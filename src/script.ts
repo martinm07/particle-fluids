@@ -45,14 +45,13 @@ function init() {
   initParticleRenders();
 }
 
-let gpuCompute: GPUComputationRenderer;
-
+// #region PBF Algorithm
 /*
 Here's a list of "chunks", which must be computed sequentially (one after the other),
  but whose work within can be done in parallel.
 =-=-= CHUNK I =-=-=
 For every particle:
-  - Apply forces (e.g. gravity), then 
+  - Apply forces (e.g. gravity, user interaction), then 
      Perform euclidean step (x*)
 =-=-= CHUNK II =-=-=
 For every particle:
@@ -87,17 +86,92 @@ Perhaps not all of this will be parallelized, as some computations may be too sm
 own kernel (e.g. s_corr), and so we might merge some of these together (e.g. into ∆p calculation). Of course
 with enough particles there will be a point where the above will overtake anything else (I'm guessing).
 
+Chunk I updates the velocity with whatever forces there are this time step, then moves the current positions
+ using that velocity. Since we calculate neighbours on this euclidean step (as opposed to the current positions),
+ we need all of them before we start start looking, pushing us to a...
+Chunk II finds particle neighbourhoods, whish is the last thing we do before the constraint solving loop.
 Chunk III precomputes results that will be used in the rest of the chunks. Everything else needs lists
-of these values and so can't be computed before we know all of them, thus pushing us into a...
+ of these values and so can't be computed before we know all of them, thus pushing us into a...
 Chunk IV computes all the λs, before we compute any ∆p. That's because we also need the λs of the particle's 
-neighbours. In the meantime we can also precompute s_corr.
+ neighbours. In the meantime we can also precompute s_corr.
 Chunk V differs slightly from the original pseudocode algorithm. Rather than computing ALL the ∆ps before updating
-the x*s (done because we need neighbouring x*s to be original), we store it in a new variable on the particle, which
-we then perform the collision response on. This should be faster, better enforce collision bounds, and have the same
-memory efficiency (since we don't need to store ∆p in turn).
-
-
+ the x*s (done because we need neighbouring x*s to be original), we store it in a new variable on the particle, which
+ we then perform the collision response on. This should be faster, better enforce collision bounds, and have the same
+ memory efficiency (since we don't need to store ∆p in turn).
+Chunk VI updates velocity for the next time step and finishes the current time step by assigng the constraint-solved
+ euclidean step of x (x*) as the new x. Note that calculating both vorticity and viscosity forces require knowing the
+ current velocity, and so results may be different if you swap the order of these two lines, or compute both before 
+ applying them.
 */
+// #endregion
+
+// #region Implementation Details
+/*
+Every chunk gets its own GPUComputationRenderer. 
+Each one will only have one variable, and none of them will have any dependencies.
+Rather, the `gpuCompute`s will feed into each other as a pipeline.
+In order to increase parallelity within the chunks, we make input textures bigger by copying
+the values one or two times. Then, we pass another uniform that's a "mask," telling the shader
+what computation it should perform. The overall goal is to always loop over the particles in
+parallel, and to minimize the work done in looping over neighbours. The one task that cannot
+be parallelized- finding neighbours- is done by reading the renderTarget's texture pixels and
+doing it in the JavaScript here.
+Following is a diagram of the implemented algorithm:
+
+---------------- uniform forces;
+| GPUCompute 1 | uniform P_v;
+| in: P        |
+----------------
+            ↓
+read pixels,
+interpret positions,
+find neighbours per particle,
+create texture of "for every particle, for every neighbour"; 
+`N` for positions and `N_v` for velocites.
+            ↓
+---------------- uniform GPUC2_Mask;
+| GPUCompute 3 | uniform N_v;
+| in: N x 3    |
+----------------
+            ↓
+---------------- uniform GPUC3_Mask;
+| GPUCompute 4 | uniform _out_; (if we're specific, then from _out_ we want `W` and `dW`, but not `dOmega`)
+| in: P x 2    |
+----------------
+            ↓
+---------------- uniform _out_; (if we're specific, then from _out_ we want `lambda` and `sCorr`)
+| GPUCompute 5 | 
+| in: P        |
+----------------
+            ↓
+assign x* ←— _out_
+for a number of iterations, go back to `GPUCompute 3`
+then
+            ↓
+---------------- uniform GPUC6_Mask;
+| GPUCompute 6 | uniform W;
+| in: P x 2    | uniform dW;
+---------------- uniform N_v;
+                 uniform dOmega;
+            ↓
+assign v ←— (1/∆t)(x* - x) + out[1] + out[2]
+assign x ←— x*
+
+One big point to consider is the indexing of these uniforms passed to the shaders, which will be sampler2Ds or `mat2`s.
+The approach we'll take is passing a varying into our GPUCompute, which will properly index mat2 arrays. We'll do this
+by modifying `GPUComputationRenderer.js` to pass a custom attribute from a BufferGeometry to the vertex shader, which
+declares a varying. In initialising a ComputationRenderer we will then pass an additional function that maps inputs
+(e.g. P x 2) to indices. Of course to pass these uniforms as `mat2`s we will need to read the data from the textues-
+which we can do with WebGLRenderer.readRenderTargetPixels(). Then we'll nicely format it, for example making rows the
+particles and columns their neighbours' positions, with overall matrix width being the max number of neighbours found
+for any particle, and the ones not covering the full width being padded with 0s after some special terminating number.
+The index passed here will just be the input index modulus the number of particles (for these things like "P x 2").
+*/
+// #endregion
+
+// console.log(1 << 31);
+
+let gpuComputes: GPUComputationRenderer[] = Array(6);
 
 interface GPUComputeVariable {
   name: string;
@@ -111,6 +185,7 @@ interface GPUComputeVariable {
   magFilter: number;
 }
 let positionVariable: GPUComputeVariable;
+let positionUniforms: { [key: string]: any };
 
 function fillPositionTexture(texture: THREE.DataTexture) {
   const theArray = texture.image.data;
@@ -125,26 +200,30 @@ function fillPositionTexture(texture: THREE.DataTexture) {
   }
 }
 function initComputeRenderer() {
-  gpuCompute = new GPUComputationRenderer(
+  gpuComputes[0] = new GPUComputationRenderer(
     texture_width,
     texture_width,
     renderer
   );
 
   if (renderer.capabilities.isWebGL2 === false) {
-    gpuCompute.setDataType(THREE.HalfFloatType);
+    gpuComputes[0].setDataType(THREE.HalfFloatType);
   }
 
-  const dtPosition = gpuCompute.createTexture();
+  const dtPosition = gpuComputes[0].createTexture();
   fillPositionTexture(dtPosition);
-  positionVariable = gpuCompute.addVariable(
+  positionVariable = gpuComputes[0].addVariable(
     "texturePosition",
     positionShaderCode,
     dtPosition
   );
-  gpuCompute.setVariableDependencies(positionVariable, [positionVariable]);
+  gpuComputes[0].setVariableDependencies(positionVariable, [positionVariable]);
 
-  const error = gpuCompute.init();
+  positionUniforms = positionVariable.material.uniforms;
+  positionUniforms["time"] = { value: 0.0 };
+  positionUniforms["delta"] = { value: 0.0 };
+
+  const error = gpuComputes[0].init();
 
   if (error !== null) {
     console.error(error);
@@ -235,18 +314,25 @@ function initParticleRenders() {
 }
 
 let start = performance.now();
+let last = performance.now();
 function render() {
   const now = performance.now();
+  let delta = (now - last) / 1000;
+  if (delta > 1) delta = 1;
+  last = now;
+
   requestAnimationFrame(render);
 
-  gpuCompute.compute();
+  positionUniforms["time"].value = now;
+  positionUniforms["delta"].value = delta;
+
+  gpuComputes[0].compute();
 
   particleUniforms["texturePosition"].value =
-    gpuCompute.getCurrentRenderTarget(positionVariable).texture;
+    gpuComputes[0].getCurrentRenderTarget(positionVariable).texture;
   if (now - start < 200) {
     console.log(particleUniforms["texturePosition"].value);
   }
-  // renderer.readRenderTargetPixels(particleUniforms["texturePosition"].value)
 
   renderer.render(scene, camera);
 }
