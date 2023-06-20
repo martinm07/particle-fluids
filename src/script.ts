@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { GPUComputationRenderer } from "three/addons/misc/GPUComputationRenderer.js";
 
 import vertexShaderCode from "./shaders/vertex-shader.glsl";
 import fragmentShaderCode from "./shaders/fragment-shader.glsl";
@@ -13,13 +12,113 @@ const WIDTH = container.clientWidth;
 const HEIGHT = container.clientHeight;
 const aspect = WIDTH / HEIGHT,
   frustumSize = 200;
-const BOUNDS = 200,
-  BOUNDS_HALF = 100;
 
 let renderer: THREE.WebGLRenderer;
 let scene: THREE.Scene;
 let camera: THREE.OrthographicCamera;
 let particleUniforms: { [key: string]: any };
+
+class GPUCompute {
+  sizeX: number;
+  sizeY: number;
+  scene: THREE.Scene;
+  camera: THREE.Camera;
+  mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  renderTarget?: THREE.WebGLRenderTarget;
+  constructor(
+    sizeX: number,
+    sizeY: number,
+    scene: THREE.Scene,
+    camera: THREE.Camera,
+    mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>
+  ) {
+    this.sizeX = sizeX;
+    this.sizeY = sizeY;
+    this.scene = scene;
+    this.camera = camera;
+    this.mesh = mesh;
+  }
+  compute() {
+    const currentRenderTarget = renderer.getRenderTarget();
+
+    const currentXrEnabled = renderer.xr.enabled;
+    const currentShadowAutoUpdate = renderer.shadowMap.autoUpdate;
+    const currentOutputColorSpace = renderer.outputColorSpace;
+    const currentToneMapping = renderer.toneMapping;
+
+    renderer.xr.enabled = false; // Avoid camera modification
+    renderer.shadowMap.autoUpdate = false; // Avoid re-computing shadows
+    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    renderer.toneMapping = THREE.NoToneMapping;
+    // renderer.setClearColor(new THREE.Color(-1, -1, -1));
+    renderer.setRenderTarget(this.renderTarget!);
+    renderer.render(this.scene, this.camera);
+
+    renderer.xr.enabled = currentXrEnabled;
+    renderer.shadowMap.autoUpdate = currentShadowAutoUpdate;
+    renderer.outputColorSpace = currentOutputColorSpace;
+    renderer.toneMapping = currentToneMapping;
+
+    renderer.setRenderTarget(currentRenderTarget);
+  }
+}
+let gpuCompute: GPUCompute;
+const passThruVertexShader = `
+void main() {
+  gl_Position = vec4(position, 1.0);
+}
+`;
+function createRandomTexture(gpuCompute: GPUCompute): THREE.DataTexture {
+  const data = new Uint8Array(gpuCompute.sizeX * gpuCompute.sizeY * 4);
+  const texture = new THREE.DataTexture(
+    data,
+    gpuCompute.sizeX,
+    gpuCompute.sizeY
+  );
+  texture.needsUpdate = true;
+  const theArray = texture.image.data;
+  for (let k = 0, kl = theArray.length; k < kl; k += 4) {
+    theArray[k + 0] = Math.random() * 200 - 100;
+    theArray[k + 1] = Math.random() * 200 - 100;
+    theArray[k + 2] = 0;
+    theArray[k + 3] = 1;
+  }
+  return texture;
+}
+function initGPUCompute() {
+  gpuCompute = new GPUCompute(
+    texture_width,
+    texture_width,
+    new THREE.Scene(),
+    new THREE.OrthographicCamera(),
+    new THREE.Mesh()
+  );
+  gpuCompute.camera.position.z = 1;
+  gpuCompute.mesh.geometry = new THREE.PlaneGeometry(2, 2);
+  gpuCompute.mesh.material = new THREE.ShaderMaterial({
+    name: "GPUComputationShader",
+    vertexShader: passThruVertexShader,
+    fragmentShader: positionShaderCode,
+  });
+  // prettier-ignore
+  gpuCompute.mesh.material.defines!.resolution = 
+    `vec2(${gpuCompute.sizeX.toFixed(1)}, ${gpuCompute.sizeY.toFixed(1)})`;
+  gpuCompute.renderTarget = new THREE.WebGLRenderTarget(
+    gpuCompute.sizeX,
+    gpuCompute.sizeY,
+    {
+      depthBuffer: false,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    }
+  );
+  gpuCompute.scene.add(gpuCompute.mesh);
+  gpuCompute.mesh.material.uniforms["texturePosition"] = {
+    value: createRandomTexture(gpuCompute),
+  };
+  gpuCompute.compute();
+  console.log(gpuCompute);
+}
 
 function init() {
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -28,7 +127,7 @@ function init() {
   renderer.setPixelRatio(window.devicePixelRatio);
   container.appendChild(renderer.domElement);
 
-  initComputeRenderer();
+  initGPUCompute();
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xffffff);
@@ -157,78 +256,16 @@ then
 assign v ←— (1/∆t)(x* - x) + out[1] + out[2]
 assign x ←— x*
 
-One big point to consider is the indexing of these uniforms passed to the shaders, which will be sampler2Ds or `mat2`s.
-The approach we'll take is passing a varying into our GPUCompute, which will properly index mat2 arrays. We'll do this
-by modifying `GPUComputationRenderer.js` to pass a custom attribute from a BufferGeometry to the vertex shader, which
-declares a varying. In initialising a ComputationRenderer we will then pass an additional function that maps inputs
-(e.g. P x 2) to indices. Of course to pass these uniforms as `mat2`s we will need to read the data from the textues-
-which we can do with WebGLRenderer.readRenderTargetPixels(). Then we'll nicely format it, for example making rows the
-particles and columns their neighbours' positions, with overall matrix width being the max number of neighbours found
-for any particle, and the ones not covering the full width being padded with 0s after some special terminating number.
-The index passed here will just be the input index modulus the number of particles (for these things like "P x 2").
+One big point to consider is the indexing of these uniforms passed to the shaders. What we'll do is pass them in as
+varyings, such that the shader program will only be exposed to a float, or a list of floats (likely done through
+Uniform Buffer Objects) for a particle's neighbours. Then, the shader will output 4 unsigned bytes (8 bits each, 0 - 255) 
+for RGBA- since that's the only supported option to read from with `.readPixels()`- which will then be interpreted 
+by the JavaScript/next shader by concatenating them together and casting it to a 32-bit float. This means that the 
+shader will only be working on one number at a time, and all input sizes above will need to be doubled for both the 
+x and y coordinate. To pass in varyings, we have to define attributes on BufferGeometries and have the fragment shader
+declare the varyings.
 */
 // #endregion
-
-// console.log(1 << 31);
-
-let gpuComputes: GPUComputationRenderer[] = Array(6);
-
-interface GPUComputeVariable {
-  name: string;
-  initialValueTexture: THREE.Texture;
-  material: THREE.ShaderMaterial;
-  dependencies: GPUComputeVariable[];
-  renderTargets: THREE.WebGLRenderTarget[];
-  wrapS: number;
-  wrapT: number;
-  minFilter: number;
-  magFilter: number;
-}
-let positionVariable: GPUComputeVariable;
-let positionUniforms: { [key: string]: any };
-
-function fillPositionTexture(texture: THREE.DataTexture) {
-  const theArray = texture.image.data;
-  for (let k = 0, kl = theArray.length; k < kl; k += 4) {
-    const x = Math.random() * BOUNDS - BOUNDS_HALF;
-    const y = Math.random() * BOUNDS - BOUNDS_HALF;
-
-    theArray[k + 0] = x;
-    theArray[k + 1] = y;
-    theArray[k + 2] = 0;
-    theArray[k + 3] = 1;
-  }
-}
-function initComputeRenderer() {
-  gpuComputes[0] = new GPUComputationRenderer(
-    texture_width,
-    texture_width,
-    renderer
-  );
-
-  if (renderer.capabilities.isWebGL2 === false) {
-    gpuComputes[0].setDataType(THREE.HalfFloatType);
-  }
-
-  const dtPosition = gpuComputes[0].createTexture();
-  fillPositionTexture(dtPosition);
-  positionVariable = gpuComputes[0].addVariable(
-    "texturePosition",
-    positionShaderCode,
-    dtPosition
-  );
-  gpuComputes[0].setVariableDependencies(positionVariable, [positionVariable]);
-
-  positionUniforms = positionVariable.material.uniforms;
-  positionUniforms["time"] = { value: 0.0 };
-  positionUniforms["delta"] = { value: 0.0 };
-
-  const error = gpuComputes[0].init();
-
-  if (error !== null) {
-    console.error(error);
-  }
-}
 
 class ParticleGeometry extends THREE.BufferGeometry {
   constructor() {
@@ -269,7 +306,6 @@ class ParticleGeometry extends THREE.BufferGeometry {
           indices.push(particleIndex + s, particleIndex + s + 1, particleIndex);
       }
     }
-    console.log(indices);
     for (let v = 0; v < points; v++) {
       const particleIndex = Math.trunc(v / (points / N_PARTICLES));
       const x = (particleIndex % texture_width) / texture_width;
@@ -313,8 +349,8 @@ function initParticleRenders() {
   scene.add(particleMesh);
 }
 
-let start = performance.now();
 let last = performance.now();
+let first = true;
 function render() {
   const now = performance.now();
   let delta = (now - last) / 1000;
@@ -323,18 +359,23 @@ function render() {
 
   requestAnimationFrame(render);
 
-  positionUniforms["time"].value = now;
-  positionUniforms["delta"].value = delta;
-
-  gpuComputes[0].compute();
-
-  particleUniforms["texturePosition"].value =
-    gpuComputes[0].getCurrentRenderTarget(positionVariable).texture;
-  if (now - start < 200) {
-    console.log(particleUniforms["texturePosition"].value);
+  gpuCompute.compute();
+  particleUniforms["texturePosition"].value = gpuCompute.renderTarget!.texture;
+  if (first) {
+    const pixelBuffer = new Uint8Array(4);
+    renderer.readRenderTargetPixels(
+      gpuCompute.renderTarget!,
+      0,
+      0,
+      1,
+      1,
+      pixelBuffer
+    );
+    console.log(pixelBuffer);
   }
 
   renderer.render(scene, camera);
+  if (first) first = false;
 }
 init();
 render();
