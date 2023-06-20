@@ -13,8 +13,9 @@ const factors = (number: number) =>
   [...Array(number + 1).keys()].filter((i) => number % i === 0);
 let factorsN = factors(tLength);
 while (factorsN.length > 3) factorsN = factorsN.slice(1, -1);
-const tWidth = factorsN[0];
-const tHeight = factorsN[factorsN.length - 1];
+const tWidth = factorsN.length === 3 ? factorsN[1] : factorsN[0];
+const tHeight =
+  factorsN.length === 3 ? factorsN[1] : factorsN[factorsN.length - 1];
 
 const container = document.querySelector<HTMLDivElement>("#scene-container")!;
 const WIDTH = container.clientWidth;
@@ -89,8 +90,8 @@ function createRandomTexture(gpuCompute: GPUCompute): THREE.DataTexture {
   texture.needsUpdate = true;
   const theArray = texture.image.data;
   for (let k = 0, kl = theArray.length; k < kl; k += 4) {
-    theArray[k + 0] = Math.random() * 200 - 100;
-    theArray[k + 1] = Math.random() * 200 - 100;
+    theArray[k + 0] = Math.random() * 255;
+    theArray[k + 1] = Math.random() * 255;
     theArray[k + 2] = 0;
     theArray[k + 3] = 1;
   }
@@ -120,11 +121,11 @@ function initGPUCompute() {
     value: createRandomTexture(gpuCompute),
   };
 
-  gpuCompute.renderTarget.width = gpuCompute.sizeX;
-  gpuCompute.renderTarget.height = gpuCompute.sizeY;
+  gpuCompute.renderTarget.setSize(gpuCompute.sizeX, gpuCompute.sizeY);
   gpuCompute.renderTarget.depthBuffer = false;
   gpuCompute.renderTarget.texture.minFilter = THREE.NearestFilter;
   gpuCompute.renderTarget.texture.magFilter = THREE.NearestFilter;
+  gpuCompute.renderTarget.texture.needsUpdate = true; // just in case...
 
   gpuCompute.scene.add(gpuCompute.mesh);
   gpuCompute.compute();
@@ -294,8 +295,6 @@ class ParticleGeometry extends THREE.BufferGeometry {
       2
     );
     const indices = [];
-    references.onUploadCallback = () =>
-      console.log("uploaded reference!", this.getAttribute("reference"));
 
     let v = 0;
     function verts_push(...args: number[]) {
@@ -364,13 +363,13 @@ function render() {
   gpuCompute.compute();
   particleUniforms["texturePosition"].value = gpuCompute.renderTarget.texture;
   if (first) {
-    const pixelBuffer = new Uint8Array(4);
+    const pixelBuffer = new Uint8Array(16);
     renderer.readRenderTargetPixels(
       gpuCompute.renderTarget,
       0,
       0,
-      1,
-      1,
+      2,
+      2,
       pixelBuffer
     );
     console.log(pixelBuffer);
