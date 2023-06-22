@@ -6,6 +6,28 @@ import positionShaderCode from "./shaders/positionComputeShader.glsl";
 
 const N_PARTICLES = 16 ** 2;
 
+const fArr = new Float32Array(1); // helper variable
+const bytesToFloat = function (bytes: Uint8Array) {
+  if (bytes.length !== 4) throw new Error("`bytes` array not of length 4.");
+  const buf = new ArrayBuffer(4);
+  const float = new Float32Array(buf);
+  const uint = new Uint8Array(buf);
+  bytes.forEach((byte, i) => (uint[i] = byte));
+  try {
+    // we expect the input to always be in little-endian order, even if
+    //  that's not how the JavaScript is storing it.
+    if (isLittleEndianness) bytes.forEach((byte, i) => (uint[i] = byte));
+    else bytes.forEach((byte, i) => (uint[3 - i] = byte));
+  } catch (error) {
+    // isLittleEndianness" is not defined
+    bytes.forEach((byte, i) => (uint[i] = byte));
+  }
+  return float[0];
+};
+const isLittleEndianness =
+  bytesToFloat(new Uint8Array([0, 0, 224, 191])) === -1.75;
+console.log(isLittleEndianness);
+
 // * 2 is for there being an x and y component of our simulation space, which our shader will receive individually
 const tLength = 2 * N_PARTICLES;
 // Find most square texture height/width
@@ -90,11 +112,13 @@ function createRandomTexture(gpuCompute: GPUCompute): THREE.DataTexture {
   texture.needsUpdate = true;
   const theArray = texture.image.data;
   for (let k = 0, kl = theArray.length; k < kl; k += 4) {
-    theArray[k + 0] = Math.random() * 255;
-    theArray[k + 1] = Math.random() * 255;
-    theArray[k + 2] = 0;
-    theArray[k + 3] = 1;
+    const num = Math.random() * 200 - 100;
+    fArr[0] = num;
+    const bytes = new Uint8Array(fArr.buffer);
+    if (!isLittleEndianness) bytes.reverse();
+    bytes.forEach((byte, i) => (theArray[k + i] = byte));
   }
+  console.log(theArray);
   return texture;
 }
 function initGPUCompute() {
@@ -290,7 +314,11 @@ class ParticleGeometry extends THREE.BufferGeometry {
     const vertex = new THREE.Vector3(); // helper variable
 
     const vertices = new THREE.BufferAttribute(new Float32Array(points * 3), 3);
-    const references = new THREE.BufferAttribute(
+    const referencesX = new THREE.BufferAttribute(
+      new Float32Array(points * 2),
+      2
+    );
+    const referencesY = new THREE.BufferAttribute(
       new Float32Array(points * 2),
       2
     );
@@ -314,18 +342,28 @@ class ParticleGeometry extends THREE.BufferGeometry {
       }
     }
     for (let v = 0; v < points; v++) {
+      // for each of the vertices constructing a circle, set all of them
+      //  referring to the same particle in the output gpuCompute texture,
+      //  noting that when reading the texture image- in a 1D, sequential
+      //  fashion (row by row, left to right)- every index is a particle's
+      //  x coord, and every other index is a y coord.
       const particleIndex = Math.trunc(v / (points / N_PARTICLES));
-      const x = (particleIndex % tWidth) / tWidth;
-      const y = Math.trunc(particleIndex / tWidth) / tWidth;
+      const refXx = ((particleIndex * 2) % tWidth) / tWidth;
+      const refXy = Math.trunc((particleIndex * 2) / tHeight) / tHeight;
+      const refYx = ((particleIndex * 2 + 1) % tWidth) / tWidth;
+      const refYy = Math.trunc((particleIndex * 2 + 1) / tHeight) / tHeight;
 
-      references.set([x, y], v * 2);
+      referencesX.set([refXx, refXy], v * 2);
+      referencesY.set([refYx, refYy], v * 2);
     }
 
     this.setIndex(indices);
     this.setAttribute("position", vertices);
-    this.setAttribute("reference", references);
+    this.setAttribute("referenceX", referencesX);
+    this.setAttribute("referenceY", referencesY);
     // optional
-    this.attributes.reference.name = "reference";
+    this.attributes.referenceX.name = "referenceX";
+    this.attributes.referenceY.name = "referenceY";
     this.attributes.position.name = "position";
   }
 }
@@ -373,6 +411,9 @@ function render() {
       pixelBuffer
     );
     console.log(pixelBuffer);
+    const floatBytes = pixelBuffer.slice(0, 4);
+    console.log(floatBytes);
+    console.log(bytesToFloat(floatBytes));
   }
 
   renderer.render(scene, camera);
