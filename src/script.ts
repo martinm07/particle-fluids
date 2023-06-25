@@ -50,27 +50,85 @@ let scene: THREE.Scene;
 let camera: THREE.OrthographicCamera;
 let particleUniforms: { [key: string]: any };
 
+interface GPUComputeInputTexture {
+  name: string,
+  texture: THREE.DataTexture
+}
+interface GPUComputeInputVarying {
+  name: string,
+  itemSize: number,
+  attribFunc: (index: number) => number[]
+}
+const gpuComputeInputIsTexture = (input: GPUComputeInputTexture|GPUComputeInputVarying): input is GPUComputeInputTexture => {
+  return 'texture' in input;
+}
+const gpuComputeInputIsVarying = (input: GPUComputeInputTexture|GPUComputeInputVarying): input is GPUComputeInputVarying => {
+  return 'attribFunc' in input;
+}
+
 class GPUCompute {
   sizeX: number;
   sizeY: number;
   scene: THREE.Scene;
   camera: THREE.Camera;
-  mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
   renderTarget: THREE.WebGLRenderTarget;
-  constructor(
-    sizeX: number,
-    sizeY: number,
-    scene: THREE.Scene,
-    camera: THREE.Camera,
-    mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>,
-    renderTarget: THREE.WebGLRenderTarget
-  ) {
-    this.sizeX = sizeX;
-    this.sizeY = sizeY;
-    this.scene = scene;
-    this.camera = camera;
-    this.mesh = mesh;
-    this.renderTarget = renderTarget;
+  private _inputs: Array<GPUComputeInputTexture|GPUComputeInputVarying>;
+  private _inputIndices: {[key: string|symbol]: number} = {};
+  inputs: {[key: string|symbol]: any};
+
+  constructor(numComputes: number, computeShader: string, inputs: Array<GPUComputeInputTexture|GPUComputeInputVarying>) {
+    let factorsN = factors(numComputes);
+    while (factorsN.length > 3) factorsN = factorsN.slice(1, -1);
+    this.sizeX = factorsN.length === 3 ? factorsN[1] : factorsN[0];
+    this.sizeY =
+      factorsN.length === 3 ? factorsN[1] : factorsN[factorsN.length - 1];
+    
+    this._inputs = inputs;
+    for (let i = 0; i < inputs.length; i++)
+      this._inputIndices[inputs[i].name] = i;
+    this.inputs = new Proxy(this._inputIndices, {
+      get: (target, prop) => {
+        if (prop in target) 
+          return this._inputs[target[prop]];
+        
+      },
+      set: (target, prop, value) => {
+        if (!(prop in target)) return false;
+        const input = this._inputs[target[prop]];
+        if (gpuComputeInputIsTexture(input)) {
+          
+        } else if (gpuComputeInputIsVarying(input)) {
+
+        }
+        return true;
+      }
+    });
+    
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.OrthographicCamera();
+    this.mesh = new THREE.Mesh();
+    this.renderTarget = new THREE.WebGLRenderTarget();
+
+    this.camera.position.z = 1;
+
+    this.mesh.geometry = new THREE.BufferGeometry();
+    this.mesh.material = new THREE.ShaderMaterial({
+      vertexShader: passThruVertexShader,
+      fragmentShader: computeShader
+    });
+    // prettier-ignore
+    this.mesh.material.defines!.resolution = 
+      `vec2(${this.sizeX.toFixed(1)}, ${this.sizeY.toFixed(1)})`;
+    
+    this.renderTarget.setSize(this.sizeX, this.sizeY);
+    this.renderTarget.depthBuffer = false;
+    this.renderTarget.texture.minFilter = THREE.NearestFilter;
+    this.renderTarget.texture.magFilter = THREE.NearestFilter;
+    this.renderTarget.texture.needsUpdate = true; // just in case...
+
+    this.scene.add(this.mesh);
+    // this.compute();
   }
   compute() {
     const currentRenderTarget = renderer.getRenderTarget();
@@ -95,6 +153,15 @@ class GPUCompute {
 
     renderer.setRenderTarget(currentRenderTarget);
   }
+  // set input(newInput: THREE.DataTexture) {
+  //   this._input = newInput;
+  //   this.mesh.material.uniforms["input"] = {
+  //     value: newInput,
+  //   };
+  // }
+  // get input(): THREE.DataTexture | undefined {
+  //   return this._input;
+  // }
 }
 let gpuCompute: GPUCompute;
 const passThruVertexShader = `
@@ -121,8 +188,16 @@ function createRandomTexture(gpuCompute: GPUCompute): THREE.DataTexture {
   console.log(theArray);
   return texture;
 }
-function initGPUCompute() {
-  gpuCompute = new GPUCompute(
+function initGPUCompute(tLength: number): GPUCompute {
+  const factors = (number: number) =>
+    [...Array(number + 1).keys()].filter((i) => number % i === 0);
+  let factorsN = factors(tLength);
+  while (factorsN.length > 3) factorsN = factorsN.slice(1, -1);
+  const tWidth = factorsN.length === 3 ? factorsN[1] : factorsN[0];
+  const tHeight =
+    factorsN.length === 3 ? factorsN[1] : factorsN[factorsN.length - 1];
+
+  const gpuCompute = new GPUCompute(
     tWidth,
     tHeight,
     new THREE.Scene(),
@@ -154,6 +229,7 @@ function initGPUCompute() {
   gpuCompute.scene.add(gpuCompute.mesh);
   gpuCompute.compute();
   console.log(gpuCompute);
+  return gpuCompute;
 }
 
 function init() {
@@ -163,7 +239,7 @@ function init() {
   renderer.setPixelRatio(window.devicePixelRatio);
   container.appendChild(renderer.domElement);
 
-  initGPUCompute();
+  gpuCompute = initGPUCompute(tLength);
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xffffff);
