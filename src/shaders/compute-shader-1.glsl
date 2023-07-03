@@ -42,7 +42,4 @@ void main() {
         float xStar = position + velocity * deltaT;
         gl_FragColor = interpretFloat(xStar);
     }
-    // gl_FragColor = interpretFloat(2.0 * gl_FragCoord.y / resolution.y - 1.0);
-
-    // gl_FragColor = interpretFloat(position);
 }

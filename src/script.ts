@@ -2,7 +2,6 @@ import * as THREE from "three";
 
 import vertexShaderCode from "./shaders/vertex-shader.glsl";
 import fragmentShaderCode from "./shaders/fragment-shader.glsl";
-// import positionShaderCode from "./shaders/positionComputeShader.glsl";
 import computeShader1Code from "./shaders/compute-shader-1.glsl";
 
 const N_PARTICLES = 16 ** 2;
@@ -50,7 +49,6 @@ const getSizeXY = (len: number) => {
 };
 let posTexWidth: number, posTexHeight: number;
 [posTexWidth, posTexHeight] = getSizeXY(P);
-console.log(posTexWidth, posTexHeight);
 
 const initTexture = (length: number) => {
   let sizeX, sizeY;
@@ -397,7 +395,6 @@ const gpuComputes: GPUCompute[] = Array(7);
 let positions: THREE.DataTexture;
 let velocities: THREE.DataTexture;
 
-// let pReference: Float32Array;
 function init() {
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(WIDTH, HEIGHT);
@@ -407,7 +404,6 @@ function init() {
 
   positions = initPositions();
   velocities = initTexture(P);
-  console.log(positions);
 
   gpuComputes[1] = new GPUCompute(P * 2, computeShader1Code, [
     {
@@ -432,27 +428,12 @@ function init() {
       texture: initTexture(P * 2),
     },
   ]);
-  // pReference = gpuComputes[1].varInputs.pReference;
   // ` * 4` for RGBA
   gpuComputes[1].texInputs.GPUC1_Mask.image.data.set([
     ...Array(P * 4).fill(1),
     ...Array(P * 4).fill(2),
   ]);
   gpuComputes[1].texInputs.GPUC1_Mask.needsUpdate = true;
-  // gpuComputes[1] = new GPUCompute(P, positionShaderCode, [
-  //   {
-  //     name: "varyingPosition",
-  //     itemSize: 1,
-  //     data: new Float32Array(2 * N_PARTICLES),
-  //   },
-  // ]);
-  // const arr = new Float32Array(48);
-  // arr.set([-75, -75, -75, 75, 30, 20, -10, 75]);
-  // arr[16] = 75;
-  // arr[17] = -75;
-  // gpuComputes[1].inputs.varyingPosition = arr;
-  console.log(gpuComputes[1].texInputs.forcesTexture);
-
   console.log(gpuComputes[1]);
 
   scene = new THREE.Scene();
@@ -705,8 +686,6 @@ function render() {
   gpuComputes[1].compute();
 
   particleUniforms["texturePosition"].value = positions;
-  // particleUniforms["texturePosition"].value =
-  //   gpuComputes[1].renderTarget.texture;
   if (first) {
     const pixelBuffer = new Uint8Array(32 * 32 * 4);
     renderer.readRenderTargetPixels(
@@ -722,21 +701,6 @@ function render() {
       i % 4 === 0 ? bytesToFloat(pixelBuffer.slice(i, i + 4)) : 0
     ).filter((_el, i) => i % 4 === 0);
     console.log(pixelBufferFloats);
-
-    // Test y (or x) values of pReference for gpuComputes[1]
-    // `compute-shader-1.glsl` must set `gl_FragColor = interpretFloat(pReference.y);`
-    // const targetArr = pReference.filter((_el, i) => i % 2 === 1); // set `i % 2 === 1` to === 0 for x values
-    // const recoveredArr = new Float32Array(targetArr.length);
-    // for (let i = 0; i < pixelBuffer.length / 4; i++)
-    //   recoveredArr[i] = bytesToFloat(pixelBuffer.slice(i * 4, (i + 1) * 4));
-
-    // for (let i = 0; i < targetArr.length; i++) {
-    //   let logOut = `${targetArr[i]} =|= ${recoveredArr[i]}`;
-    //   if ((i + 1) % 32 === 0) logOut += " ⤣";
-    //   if (targetArr[i] !== recoveredArr[i])
-    //     console.log(`${i}: ` + "%c" + logOut, "color: red");
-    //   else console.log(`${i}: ` + logOut);
-    // }
   }
 
   renderer.render(scene, camera);
