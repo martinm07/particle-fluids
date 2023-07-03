@@ -2,9 +2,11 @@ import * as THREE from "three";
 
 import vertexShaderCode from "./shaders/vertex-shader.glsl";
 import fragmentShaderCode from "./shaders/fragment-shader.glsl";
-import positionShaderCode from "./shaders/positionComputeShader.glsl";
+// import positionShaderCode from "./shaders/positionComputeShader.glsl";
+import computeShader1Code from "./shaders/compute-shader-1.glsl";
 
 const N_PARTICLES = 16 ** 2;
+const P = 2 * N_PARTICLES;
 
 const bytesToFloat = function (bytes: Uint8Array) {
   if (bytes.length !== 4) throw new Error("`bytes` array not of length 4.");
@@ -27,9 +29,57 @@ const isLittleEndianness =
   bytesToFloat(new Uint8Array([0, 0, 224, 191])) === -1.75;
 console.log(`CPU is ${isLittleEndianness ? "little-endian" : "big-endian"}`);
 
+// helper variables
+const fArr = new Float32Array(1);
+const bArr = new Uint8Array(fArr.buffer);
+function floatToBytesArray(num: number) {
+  fArr[0] = num;
+  if (isLittleEndianness) return bArr;
+  else return Array.from(bArr).reverse();
+}
+
 const factors = (number: number) =>
   [...Array(number + 1).keys()].filter((i) => number % i === 0);
+const getSizeXY = (len: number) => {
+  let factorsN = factors(len);
+  while (factorsN.length > 3) factorsN = factorsN.slice(1, -1);
+  return [
+    factorsN.length === 3 ? factorsN[1] : factorsN[0],
+    factorsN.length === 3 ? factorsN[1] : factorsN[factorsN.length - 1],
+  ];
+};
 let posTexWidth: number, posTexHeight: number;
+[posTexWidth, posTexHeight] = getSizeXY(P);
+console.log(posTexWidth, posTexHeight);
+
+const initTexture = (length: number) => {
+  let sizeX, sizeY;
+  [sizeX, sizeY] = getSizeXY(length);
+  return new THREE.DataTexture(new Uint8Array(4 * sizeX * sizeY), sizeX, sizeY);
+};
+const createTextureReference = (
+  numComputes: number,
+  texLength: number
+): Float32Array => {
+  let texHeight: number, texWidth: number;
+  [texWidth, texHeight] = getSizeXY(texLength);
+
+  const canvasMultiple = numComputes / texLength;
+  if (canvasMultiple !== Math.floor(canvasMultiple))
+    throw new Error("`numComputes` not a multiple of `texLength`");
+
+  // this must match up with the behaviour of gl_FragCoord:
+  // https://registry.khronos.org/OpenGL-Refpages/gl4/html/gl_FragCoord.xhtml
+  const final = [];
+  for (let _ = 0; _ < canvasMultiple; _++)
+    for (let j = 0; j < texHeight; j++)
+      for (let i = 0; i < texWidth; i++) {
+        final.push((i + 0.5) / texWidth, (j + 0.5) / texHeight);
+        // final.push(i + 1, j + i * texHeight);
+      }
+
+  return new Float32Array(final);
+};
 
 const container = document.querySelector<HTMLDivElement>("#scene-container")!;
 const WIDTH = container.clientWidth;
@@ -51,6 +101,12 @@ interface GPUComputeInputVarying {
   itemSize: number;
   data: Float32Array;
 }
+interface GPUComputeVarInputs {
+  [key: string | symbol]: Float32Array;
+}
+interface GPUComputeTexInputs {
+  [key: string | symbol]: THREE.DataTexture;
+}
 const gpuComputeInputIsTexture = (
   input: GPUComputeInputTexture | GPUComputeInputVarying
 ): input is GPUComputeInputTexture => {
@@ -71,49 +127,62 @@ class GPUCompute {
   renderTarget: THREE.WebGLRenderTarget;
   private _inputs: Array<GPUComputeInputTexture | GPUComputeInputVarying>;
   private _inputIndices: { [key: string | symbol]: number } = {};
-  inputs: { [key: string | symbol]: any };
+  varInputs: GPUComputeVarInputs;
+  texInputs: GPUComputeTexInputs;
 
   constructor(
     numComputes: number,
     computeShader: string,
     inputs: Array<GPUComputeInputTexture | GPUComputeInputVarying>
   ) {
-    let factorsN = factors(numComputes);
-    while (factorsN.length > 3) factorsN = factorsN.slice(1, -1);
-    this.sizeX = factorsN.length === 3 ? factorsN[1] : factorsN[0];
-    this.sizeY =
-      factorsN.length === 3 ? factorsN[1] : factorsN[factorsN.length - 1];
+    [this.sizeX, this.sizeY] = getSizeXY(numComputes);
 
     this._inputs = inputs;
     for (let i = 0; i < inputs.length; i++)
       this._inputIndices[inputs[i].name] = i;
-    this.inputs = new Proxy(this._inputIndices, {
-      get: (target, prop) => {
-        if (prop in target) {
-          const input = this._inputs[target[prop]];
-          if (gpuComputeInputIsTexture(input)) return input.texture;
-          else if (gpuComputeInputIsVarying(input)) return input.data;
-        }
-      },
-      set: (target, prop, value) => {
-        if (!(prop in target)) return false;
-        const input = this._inputs[target[prop]];
-        if (gpuComputeInputIsTexture(input)) {
+    this.varInputs = new Proxy<GPUComputeVarInputs>(
+      {},
+      {
+        get: (_target, prop) => {
+          if (prop in this._inputIndices) {
+            const input = this._inputs[this._inputIndices[prop]];
+            if (gpuComputeInputIsVarying(input)) return input.data;
+          }
+        },
+        set: (_target, prop, value) => {
+          if (!(prop in this._inputIndices)) return false;
+          const input = this._inputs[this._inputIndices[prop]];
+          if (!gpuComputeInputIsVarying(input)) return false;
+          const attrib = this.mesh.geometry.getAttribute("a_" + String(prop));
+          if (!(attrib instanceof THREE.BufferAttribute)) return false;
+          attrib.set(value);
+          attrib.needsUpdate = true;
+          input.data = value;
+          return true;
+        },
+      }
+    );
+    this.texInputs = new Proxy<GPUComputeTexInputs>(
+      {},
+      {
+        get: (_target, prop) => {
+          if (prop in this._inputIndices) {
+            const input = this._inputs[this._inputIndices[prop]];
+            if (gpuComputeInputIsTexture(input)) return input.texture;
+          }
+        },
+        set: (_target, prop, value) => {
+          if (!(prop in this._inputIndices)) return false;
+          const input = this._inputs[this._inputIndices[prop]];
+          if (!gpuComputeInputIsTexture(input)) return false;
           if (!(value instanceof THREE.DataTexture)) return false;
           this.mesh.material.uniforms[String(prop)] = { value };
           this.mesh.material.needsUpdate = true;
           input.texture = value;
-        } else if (gpuComputeInputIsVarying(input)) {
-          const attrib = this.mesh.geometry.getAttribute("a_" + String(prop));
-          if (!(attrib instanceof THREE.BufferAttribute)) return false;
-          // if (!(value instanceof Float32Array)) return false;
-          attrib.set(value);
-          attrib.needsUpdate = true;
-          input.data = value;
-        }
-        return true;
-      },
-    });
+          return true;
+        },
+      }
+    );
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera();
@@ -132,6 +201,7 @@ class GPUCompute {
     // These are normalized coordinates to mean that that the geometry will cover the entire canvas,
     //  which we need to do so that it rasterizes the whole canvas and generate calls to the fragment
     //  shader for every pixel along the canvas' height and width.
+    // Here's a diagram that visualises the intent: https://imgur.com/a/rZr9jrh
     const vertices = new Float32Array((numComputes + 4) * 3);
     const X = this.sizeX,
       Y = this.sizeY;
@@ -139,8 +209,28 @@ class GPUCompute {
     const get1DIndex = (i: number, j: number) => i + j * X;
     for (let i = 0; i < X; i++)
       for (let j = 0; j < Y; j++) {
-        const fragCenterX = (2 * i) / X + 1 / X - 1;
-        const fragCenterY = (2 * j) / Y + 1 / Y - 1;
+        let fragCenterX = (2 * i) / X + 1 / X - 1;
+        let fragCenterY = (2 * j) / Y + 1 / Y - 1;
+        // This is to nudge WebGL to which primitive around the vertex the fragment falls in.
+        const EPSILON = 0.001;
+
+        const isTop = j === Y - 1;
+        const isRight = i === X - 1;
+        const isBottom = j === 0;
+        const isLeft = i === 0;
+        const adjust = (xEpsilon: number, yEpsilon: number) => {
+          fragCenterX += xEpsilon;
+          fragCenterY += yEpsilon;
+        };
+
+        if (isBottom && i === 1) adjust(0.5 * EPSILON, -EPSILON);
+        else if (isTop && i === X - 2) adjust(-0.5 * EPSILON, EPSILON);
+        else if (isBottom && !isLeft) adjust(EPSILON, -0.5 * EPSILON);
+        else if (isTop && !isRight) adjust(-EPSILON, 0.5 * EPSILON);
+        else if (isRight || (i === X - 2 && j === Y - 2))
+          adjust(EPSILON, EPSILON);
+        else adjust(-EPSILON, -EPSILON);
+
         vertices.set([fragCenterX, fragCenterY, 0], 3 * get1DIndex(i, j));
       }
 
@@ -152,8 +242,23 @@ class GPUCompute {
         const b = get1DIndex(i + 1, j);
         const c = get1DIndex(i, j + 1);
         const d = get1DIndex(i + 1, j + 1);
-        indices.push(a, b, c);
-        indices.push(b, c, d);
+        // We want the order to be counter-clockwise when looking at it from the outside
+        //  https://stackoverflow.com/a/24592606/11493659
+
+        const isTop = j === Y - 2;
+        const isRight = i === X - 2;
+        const isBottom = j === 0;
+        const isLeft = i === 0;
+        // Using the `flat` qualifier for the varyings, we need to make sure the provoking
+        //  vertex (i.e. the last vertex) is the one that corresponds with the fragment's vertex
+        //  we gave it. This of course depends on the directions we nudge them, above.
+        if (isLeft || (!isBottom && !(isTop && isRight))) indices.push(b, c, a);
+        else if (isBottom) indices.push(c, a, b);
+        else if (isTop && isRight) indices.push(a, b, c);
+
+        if (isRight || (!isTop && !(isBottom && isLeft))) indices.push(c, b, d);
+        else if (isTop) indices.push(b, d, c);
+        else if (isBottom && isLeft) indices.push(d, c, b);
       }
 
     vertices.set([-1, 1, 0, 1, 1, 0, -1, -1, 0, 1, -1, 0], 3 * X * Y);
@@ -184,9 +289,14 @@ class GPUCompute {
     let vertexShader = passThruVertexShader;
     for (const input of inputs)
       if (gpuComputeInputIsVarying(input)) {
+        const data = new Float32Array(vertices.length);
+        data.set(input.data);
+        const expand = (arr: number[]) =>
+          arr.map((el) => Array(input.itemSize).fill(el)).flat();
+        data.set(expand([0, 0, 0, 0]), input.data.length);
         this.mesh.geometry.setAttribute(
           "a_" + input.name,
-          new THREE.BufferAttribute(input.data, input.itemSize)
+          new THREE.BufferAttribute(data, input.itemSize)
         );
 
         let attribType;
@@ -197,7 +307,8 @@ class GPUCompute {
 
         vertexShader =
           `attribute ${attribType} a_${input.name};\n` + vertexShader;
-        vertexShader = `varying ${attribType} ${input.name};\n` + vertexShader;
+        vertexShader =
+          `flat varying ${attribType} ${input.name};\n` + vertexShader;
         const voidmainMatch = vertexShader
           .matchAll(/void +main\(.*\) *{\s*/g)
           .next().value;
@@ -216,6 +327,10 @@ class GPUCompute {
     // prettier-ignore
     this.mesh.material.defines!.resolution = 
       `vec2(${this.sizeX.toFixed(1)}, ${this.sizeY.toFixed(1)})`;
+    for (const input of inputs)
+      if (gpuComputeInputIsTexture(input)) {
+        this.mesh.material.uniforms[input.name] = { value: input.texture };
+      }
 
     this.renderTarget.setSize(this.sizeX, this.sizeY);
     this.renderTarget.depthBuffer = false;
@@ -249,14 +364,40 @@ class GPUCompute {
 
     renderer.setRenderTarget(currentRenderTarget);
   }
+  updateUniform(name: string, value: any) {
+    this.mesh.material.uniforms[name] ??= { value };
+    this.mesh.material.uniforms[name].value = value;
+  }
 }
-let gpuCompute: GPUCompute;
 const passThruVertexShader = `
 void main() {
     gl_Position = vec4(position, 1.0);
 }
 `;
 
+function initPositions(): THREE.DataTexture {
+  const texture = initTexture(P);
+  texture.needsUpdate = true;
+  const theArray = texture.image.data;
+  for (let i = 0, il = theArray.length; i < il / 4; i++) {
+    let num: number;
+    if (i % 2 === 0) {
+      // x coordinate
+      num = (i % 20) * Math.sqrt(3) - 20;
+    } else {
+      // y coordinate
+      num = Math.floor(i / 20) * 3 + 10;
+    }
+    theArray.set(floatToBytesArray(num), i * 4);
+  }
+  return texture;
+}
+
+const gpuComputes: GPUCompute[] = Array(7);
+let positions: THREE.DataTexture;
+let velocities: THREE.DataTexture;
+
+// let pReference: Float32Array;
 function init() {
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(WIDTH, HEIGHT);
@@ -264,20 +405,55 @@ function init() {
   renderer.setPixelRatio(window.devicePixelRatio);
   container.appendChild(renderer.domElement);
 
-  gpuCompute = new GPUCompute(2 * N_PARTICLES, positionShaderCode, [
+  positions = initPositions();
+  velocities = initTexture(P);
+  console.log(positions);
+
+  gpuComputes[1] = new GPUCompute(P * 2, computeShader1Code, [
     {
-      name: "varyingPosition",
-      itemSize: 1,
-      data: new Float32Array(2 * N_PARTICLES).map(
-        (_el) => Math.random() * 200 - 100
-      ),
+      name: "forcesTexture",
+      texture: initTexture(P),
+    },
+    {
+      name: "positionsTexture",
+      texture: positions,
+    },
+    {
+      name: "velocitiesTexture",
+      texture: velocities,
+    },
+    {
+      name: "pReference",
+      itemSize: 2,
+      data: createTextureReference(P * 2, P),
+    },
+    {
+      name: "GPUC1_Mask",
+      texture: initTexture(P * 2),
     },
   ]);
+  // pReference = gpuComputes[1].varInputs.pReference;
+  // ` * 4` for RGBA
+  gpuComputes[1].texInputs.GPUC1_Mask.image.data.set([
+    ...Array(P * 4).fill(1),
+    ...Array(P * 4).fill(2),
+  ]);
+  gpuComputes[1].texInputs.GPUC1_Mask.needsUpdate = true;
+  // gpuComputes[1] = new GPUCompute(P, positionShaderCode, [
+  //   {
+  //     name: "varyingPosition",
+  //     itemSize: 1,
+  //     data: new Float32Array(2 * N_PARTICLES),
+  //   },
+  // ]);
+  // const arr = new Float32Array(48);
+  // arr.set([-75, -75, -75, 75, 30, 20, -10, 75]);
+  // arr[16] = 75;
+  // arr[17] = -75;
+  // gpuComputes[1].inputs.varyingPosition = arr;
+  console.log(gpuComputes[1].texInputs.forcesTexture);
 
-  console.log(gpuCompute);
-
-  posTexWidth = gpuCompute.sizeX;
-  posTexHeight = gpuCompute.sizeY;
+  console.log(gpuComputes[1]);
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xffffff);
@@ -380,7 +556,7 @@ Following is a diagram of the implemented algorithm:
 
 ---------------- uniform forces;
 | GPUCompute 1 | uniform P_v;
-| in: P        |
+| in: P x 2    |
 ----------------
             ↓
 read pixels,
@@ -525,22 +701,42 @@ function render() {
 
   requestAnimationFrame(render);
 
-  gpuCompute.compute();
-  particleUniforms["texturePosition"].value = gpuCompute.renderTarget.texture;
+  gpuComputes.forEach((gpuc) => gpuc.updateUniform("deltaT", delta));
+  gpuComputes[1].compute();
+
+  particleUniforms["texturePosition"].value = positions;
+  // particleUniforms["texturePosition"].value =
+  //   gpuComputes[1].renderTarget.texture;
   if (first) {
-    const pixelBuffer = new Uint8Array(16);
+    const pixelBuffer = new Uint8Array(32 * 32 * 4);
     renderer.readRenderTargetPixels(
-      gpuCompute.renderTarget,
+      gpuComputes[1].renderTarget,
       0,
       0,
-      2,
-      2,
+      32,
+      32,
       pixelBuffer
     );
-    console.log(pixelBuffer);
-    const floatBytes = pixelBuffer.slice(0, 4);
-    console.log(floatBytes);
-    console.log(bytesToFloat(floatBytes));
+    // prettier-ignore
+    const pixelBufferFloats = Array(...pixelBuffer).map((_el, i) =>
+      i % 4 === 0 ? bytesToFloat(pixelBuffer.slice(i, i + 4)) : 0
+    ).filter((_el, i) => i % 4 === 0);
+    console.log(pixelBufferFloats);
+
+    // Test y (or x) values of pReference for gpuComputes[1]
+    // `compute-shader-1.glsl` must set `gl_FragColor = interpretFloat(pReference.y);`
+    // const targetArr = pReference.filter((_el, i) => i % 2 === 1); // set `i % 2 === 1` to === 0 for x values
+    // const recoveredArr = new Float32Array(targetArr.length);
+    // for (let i = 0; i < pixelBuffer.length / 4; i++)
+    //   recoveredArr[i] = bytesToFloat(pixelBuffer.slice(i * 4, (i + 1) * 4));
+
+    // for (let i = 0; i < targetArr.length; i++) {
+    //   let logOut = `${targetArr[i]} =|= ${recoveredArr[i]}`;
+    //   if ((i + 1) % 32 === 0) logOut += " ⤣";
+    //   if (targetArr[i] !== recoveredArr[i])
+    //     console.log(`${i}: ` + "%c" + logOut, "color: red");
+    //   else console.log(`${i}: ` + logOut);
+    // }
   }
 
   renderer.render(scene, camera);
