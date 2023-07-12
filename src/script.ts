@@ -5,7 +5,7 @@ import fragmentShaderCode from "./shaders/fragment-shader.glsl";
 // import positionShaderCode from "./shaders/positionComputeShader.glsl";
 import computeShader1Code from "./shaders/compute-shader-1.glsl";
 
-const N_PARTICLES = 16 ** 2;
+const N_PARTICLES = 80 * 128;
 const P = 2 * N_PARTICLES;
 
 const bytesToFloat = function (bytes: Uint8Array) {
@@ -379,6 +379,7 @@ function initPositions(): THREE.DataTexture {
   const texture = initTexture(P);
   texture.needsUpdate = true;
   const theArray = texture.image.data;
+  const test = [];
   for (let i = 0, il = theArray.length; i < il / 4; i++) {
     let num: number;
     if (i % 2 === 0) {
@@ -389,7 +390,9 @@ function initPositions(): THREE.DataTexture {
       num = Math.floor(i / 20) * 3 + 10;
     }
     theArray.set(floatToBytesArray(num), i * 4);
+    test.push(num);
   }
+  console.log(test);
   return texture;
 }
 
@@ -397,7 +400,7 @@ const gpuComputes: GPUCompute[] = Array(7);
 let positions: THREE.DataTexture;
 let velocities: THREE.DataTexture;
 
-// let pReference: Float32Array;
+let pReference: Float32Array;
 function init() {
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(WIDTH, HEIGHT);
@@ -409,30 +412,15 @@ function init() {
   velocities = initTexture(P);
   console.log(positions);
 
+  // prettier-ignore
   gpuComputes[1] = new GPUCompute(P * 2, computeShader1Code, [
-    {
-      name: "forcesTexture",
-      texture: initTexture(P),
-    },
-    {
-      name: "positionsTexture",
-      texture: positions,
-    },
-    {
-      name: "velocitiesTexture",
-      texture: velocities,
-    },
-    {
-      name: "pReference",
-      itemSize: 2,
-      data: createTextureReference(P * 2, P),
-    },
-    {
-      name: "GPUC1_Mask",
-      texture: initTexture(P * 2),
-    },
+    { name: "forcesTexture", texture: initTexture(P) },
+    { name: "positionsTexture", texture: positions },
+    { name: "velocitiesTexture", texture: velocities },
+    { name: "pReference", itemSize: 2, data: createTextureReference(P * 2, P) },
+    { name: "GPUC1_Mask", texture: initTexture(P * 2) },
   ]);
-  // pReference = gpuComputes[1].varInputs.pReference;
+  pReference = gpuComputes[1].varInputs.pReference;
   // ` * 4` for RGBA
   gpuComputes[1].texInputs.GPUC1_Mask.image.data.set([
     ...Array(P * 4).fill(1),
@@ -708,13 +696,14 @@ function render() {
   // particleUniforms["texturePosition"].value =
   //   gpuComputes[1].renderTarget.texture;
   if (first) {
-    const pixelBuffer = new Uint8Array(32 * 32 * 4);
+    console.log(gpuComputes[1].sizeX, gpuComputes[1].sizeY);
+    const pixelBuffer = new Uint8Array(gpuComputes[1].sizeX * gpuComputes[1].sizeY * 4);
     renderer.readRenderTargetPixels(
       gpuComputes[1].renderTarget,
       0,
       0,
-      32,
-      32,
+      gpuComputes[1].sizeX,
+      gpuComputes[1].sizeY,
       pixelBuffer
     );
     // prettier-ignore
@@ -725,18 +714,19 @@ function render() {
 
     // Test y (or x) values of pReference for gpuComputes[1]
     // `compute-shader-1.glsl` must set `gl_FragColor = interpretFloat(pReference.y);`
-    // const targetArr = pReference.filter((_el, i) => i % 2 === 1); // set `i % 2 === 1` to === 0 for x values
-    // const recoveredArr = new Float32Array(targetArr.length);
-    // for (let i = 0; i < pixelBuffer.length / 4; i++)
-    //   recoveredArr[i] = bytesToFloat(pixelBuffer.slice(i * 4, (i + 1) * 4));
+    const targetArr = pReference.filter((_el, i) => i % 2 === 1); // set `i % 2 === 1` to === 0 for x values
+    const recoveredArr = new Float32Array(targetArr.length);
+    for (let i = 0; i < pixelBuffer.length / 4; i++)
+      recoveredArr[i] = bytesToFloat(pixelBuffer.slice(i * 4, (i + 1) * 4));
 
-    // for (let i = 0; i < targetArr.length; i++) {
-    //   let logOut = `${targetArr[i]} =|= ${recoveredArr[i]}`;
-    //   if ((i + 1) % 32 === 0) logOut += " ⤣";
-    //   if (targetArr[i] !== recoveredArr[i])
-    //     console.log(`${i}: ` + "%c" + logOut, "color: red");
-    //   else console.log(`${i}: ` + logOut);
-    // }
+    for (let i = 0; i < targetArr.length; i++) {
+      if (i % 10 !== 0) continue;
+      let logOut = `${targetArr[i]} =|= ${recoveredArr[i]}`;
+      if ((i + 1) % 32 === 0) logOut += " ⤣";
+      if (targetArr[i] !== recoveredArr[i])
+        console.log(`${i}: ` + "%c" + logOut, "color: red");
+      else console.log(`${i}: ` + logOut);
+    }
   }
 
   renderer.render(scene, camera);
