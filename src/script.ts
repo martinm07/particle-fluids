@@ -4,82 +4,25 @@ import vertexShaderCode from "./shaders/vertex-shader.glsl";
 import fragmentShaderCode from "./shaders/fragment-shader.glsl";
 // import positionShaderCode from "./shaders/positionComputeShader.glsl";
 import computeShader1Code from "./shaders/compute-shader-1.glsl";
+import { GPUCompute } from "./GPUCompute";
+import {
+  bytesToFloat,
+  isLittleEndianness,
+  floatToBytesArray,
+  getSizeXY,
+  initTexture,
+  createTextureReference,
+} from "./helper";
 
-const N_PARTICLES = 80 * 128;
+// 80 * 128
+const N_PARTICLES = 16 ** 2;
 const P = 2 * N_PARTICLES;
 
-const bytesToFloat = function (bytes: Uint8Array) {
-  if (bytes.length !== 4) throw new Error("`bytes` array not of length 4.");
-  const buf = new ArrayBuffer(4);
-  const float = new Float32Array(buf);
-  const uint = new Uint8Array(buf);
-  bytes.forEach((byte, i) => (uint[i] = byte));
-  try {
-    // we expect the input to always be in little-endian order, even if
-    //  that's not how the JavaScript is storing it.
-    if (isLittleEndianness) bytes.forEach((byte, i) => (uint[i] = byte));
-    else bytes.forEach((byte, i) => (uint[3 - i] = byte));
-  } catch (error) {
-    // isLittleEndianness" is not defined
-    bytes.forEach((byte, i) => (uint[i] = byte));
-  }
-  return float[0];
-};
-const isLittleEndianness =
-  bytesToFloat(new Uint8Array([0, 0, 224, 191])) === -1.75;
 console.log(`CPU is ${isLittleEndianness ? "little-endian" : "big-endian"}`);
 
-// helper variables
-const fArr = new Float32Array(1);
-const bArr = new Uint8Array(fArr.buffer);
-function floatToBytesArray(num: number) {
-  fArr[0] = num;
-  if (isLittleEndianness) return bArr;
-  else return Array.from(bArr).reverse();
-}
-
-const factors = (number: number) =>
-  [...Array(number + 1).keys()].filter((i) => number % i === 0);
-const getSizeXY = (len: number) => {
-  let factorsN = factors(len);
-  while (factorsN.length > 3) factorsN = factorsN.slice(1, -1);
-  return [
-    factorsN.length === 3 ? factorsN[1] : factorsN[0],
-    factorsN.length === 3 ? factorsN[1] : factorsN[factorsN.length - 1],
-  ];
-};
 let posTexWidth: number, posTexHeight: number;
 [posTexWidth, posTexHeight] = getSizeXY(P);
 console.log(posTexWidth, posTexHeight);
-
-const initTexture = (length: number) => {
-  let sizeX, sizeY;
-  [sizeX, sizeY] = getSizeXY(length);
-  return new THREE.DataTexture(new Uint8Array(4 * sizeX * sizeY), sizeX, sizeY);
-};
-const createTextureReference = (
-  numComputes: number,
-  texLength: number
-): Float32Array => {
-  let texHeight: number, texWidth: number;
-  [texWidth, texHeight] = getSizeXY(texLength);
-
-  const canvasMultiple = numComputes / texLength;
-  if (canvasMultiple !== Math.floor(canvasMultiple))
-    throw new Error("`numComputes` not a multiple of `texLength`");
-
-  // this must match up with the behaviour of gl_FragCoord:
-  // https://registry.khronos.org/OpenGL-Refpages/gl4/html/gl_FragCoord.xhtml
-  const final = [];
-  for (let _ = 0; _ < canvasMultiple; _++)
-    for (let j = 0; j < texHeight; j++)
-      for (let i = 0; i < texWidth; i++) {
-        final.push((i + 0.5) / texWidth, (j + 0.5) / texHeight);
-        // final.push(i + 1, j + i * texHeight);
-      }
-
-  return new Float32Array(final);
-};
 
 const container = document.querySelector<HTMLDivElement>("#scene-container")!;
 const WIDTH = container.clientWidth;
@@ -91,289 +34,6 @@ let renderer: THREE.WebGLRenderer;
 let scene: THREE.Scene;
 let camera: THREE.OrthographicCamera;
 let particleUniforms: { [key: string]: any };
-
-interface GPUComputeInputTexture {
-  name: string;
-  texture: THREE.DataTexture;
-}
-interface GPUComputeInputVarying {
-  name: string;
-  itemSize: number;
-  data: Float32Array;
-}
-interface GPUComputeVarInputs {
-  [key: string | symbol]: Float32Array;
-}
-interface GPUComputeTexInputs {
-  [key: string | symbol]: THREE.DataTexture;
-}
-const gpuComputeInputIsTexture = (
-  input: GPUComputeInputTexture | GPUComputeInputVarying
-): input is GPUComputeInputTexture => {
-  return "texture" in input;
-};
-const gpuComputeInputIsVarying = (
-  input: GPUComputeInputTexture | GPUComputeInputVarying
-): input is GPUComputeInputVarying => {
-  return "itemSize" in input;
-};
-
-class GPUCompute {
-  sizeX: number;
-  sizeY: number;
-  scene: THREE.Scene;
-  camera: THREE.Camera;
-  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
-  renderTarget: THREE.WebGLRenderTarget;
-  private _inputs: Array<GPUComputeInputTexture | GPUComputeInputVarying>;
-  private _inputIndices: { [key: string | symbol]: number } = {};
-  varInputs: GPUComputeVarInputs;
-  texInputs: GPUComputeTexInputs;
-
-  constructor(
-    numComputes: number,
-    computeShader: string,
-    inputs: Array<GPUComputeInputTexture | GPUComputeInputVarying>
-  ) {
-    [this.sizeX, this.sizeY] = getSizeXY(numComputes);
-
-    this._inputs = inputs;
-    for (let i = 0; i < inputs.length; i++)
-      this._inputIndices[inputs[i].name] = i;
-    this.varInputs = new Proxy<GPUComputeVarInputs>(
-      {},
-      {
-        get: (_target, prop) => {
-          if (prop in this._inputIndices) {
-            const input = this._inputs[this._inputIndices[prop]];
-            if (gpuComputeInputIsVarying(input)) return input.data;
-          }
-        },
-        set: (_target, prop, value) => {
-          if (!(prop in this._inputIndices)) return false;
-          const input = this._inputs[this._inputIndices[prop]];
-          if (!gpuComputeInputIsVarying(input)) return false;
-          const attrib = this.mesh.geometry.getAttribute("a_" + String(prop));
-          if (!(attrib instanceof THREE.BufferAttribute)) return false;
-          attrib.set(value);
-          attrib.needsUpdate = true;
-          input.data = value;
-          return true;
-        },
-      }
-    );
-    this.texInputs = new Proxy<GPUComputeTexInputs>(
-      {},
-      {
-        get: (_target, prop) => {
-          if (prop in this._inputIndices) {
-            const input = this._inputs[this._inputIndices[prop]];
-            if (gpuComputeInputIsTexture(input)) return input.texture;
-          }
-        },
-        set: (_target, prop, value) => {
-          if (!(prop in this._inputIndices)) return false;
-          const input = this._inputs[this._inputIndices[prop]];
-          if (!gpuComputeInputIsTexture(input)) return false;
-          if (!(value instanceof THREE.DataTexture)) return false;
-          this.mesh.material.uniforms[String(prop)] = { value };
-          this.mesh.material.needsUpdate = true;
-          input.texture = value;
-          return true;
-        },
-      }
-    );
-
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.OrthographicCamera();
-    this.mesh = new THREE.Mesh();
-    this.renderTarget = new THREE.WebGLRenderTarget();
-
-    this.camera.position.z = 1;
-
-    // Instead of a simple PlaneGeometry made up of two triangles, we want to pass in values
-    //  to the fragment shader as varyings, which means that for every call to the fragment
-    //  shader there should be a vertex positioned exactly in the center of that fragment/pixel
-    //  with the values from attributes, declares, and then copies them into varyings. They need
-    //  to be properly positioned so that we don't end up interpolating the values from multiple.
-    this.mesh.geometry = new THREE.BufferGeometry();
-    // +4 is for four vertices positioned at the corners, (-1, 1), (1, 1), (-1, -1) and (1, -1).
-    // These are normalized coordinates to mean that that the geometry will cover the entire canvas,
-    //  which we need to do so that it rasterizes the whole canvas and generate calls to the fragment
-    //  shader for every pixel along the canvas' height and width.
-    // Here's a diagram that visualises the intent: https://imgur.com/a/rZr9jrh
-    const vertices = new Float32Array((numComputes + 4) * 3);
-    const X = this.sizeX,
-      Y = this.sizeY;
-    // Ordering it this way means it reads top to bottom, left to right
-    const get1DIndex = (i: number, j: number) => i + j * X;
-    for (let i = 0; i < X; i++)
-      for (let j = 0; j < Y; j++) {
-        let fragCenterX = (2 * i) / X + 1 / X - 1;
-        let fragCenterY = (2 * j) / Y + 1 / Y - 1;
-        // This is to nudge WebGL to which primitive around the vertex the fragment falls in.
-        const EPSILON = 0.001;
-
-        const isTop = j === Y - 1;
-        const isRight = i === X - 1;
-        const isBottom = j === 0;
-        const isLeft = i === 0;
-        const adjust = (xEpsilon: number, yEpsilon: number) => {
-          fragCenterX += xEpsilon;
-          fragCenterY += yEpsilon;
-        };
-
-        if (isBottom && i === 1) adjust(0.5 * EPSILON, -EPSILON);
-        else if (isTop && i === X - 2) adjust(-0.5 * EPSILON, EPSILON);
-        else if (isBottom && !isLeft) adjust(EPSILON, -0.5 * EPSILON);
-        else if (isTop && !isRight) adjust(-EPSILON, 0.5 * EPSILON);
-        else if (isRight || (i === X - 2 && j === Y - 2))
-          adjust(EPSILON, EPSILON);
-        else adjust(-EPSILON, -EPSILON);
-
-        vertices.set([fragCenterX, fragCenterY, 0], 3 * get1DIndex(i, j));
-      }
-
-    // Tesselate the plane with smaller boxes made of two triangles
-    const indices: number[] = [];
-    for (let i = 0; i < X - 1; i++)
-      for (let j = 0; j < Y - 1; j++) {
-        const a = get1DIndex(i, j);
-        const b = get1DIndex(i + 1, j);
-        const c = get1DIndex(i, j + 1);
-        const d = get1DIndex(i + 1, j + 1);
-        // We want the order to be counter-clockwise when looking at it from the outside
-        //  https://stackoverflow.com/a/24592606/11493659
-
-        const isTop = j === Y - 2;
-        const isRight = i === X - 2;
-        const isBottom = j === 0;
-        const isLeft = i === 0;
-        // Using the `flat` qualifier for the varyings, we need to make sure the provoking
-        //  vertex (i.e. the last vertex) is the one that corresponds with the fragment's vertex
-        //  we gave it. This of course depends on the directions we nudge them, above.
-        if (isLeft || (!isBottom && !(isTop && isRight))) indices.push(b, c, a);
-        else if (isBottom) indices.push(c, a, b);
-        else if (isTop && isRight) indices.push(a, b, c);
-
-        if (isRight || (!isTop && !(isBottom && isLeft))) indices.push(c, b, d);
-        else if (isTop) indices.push(b, d, c);
-        else if (isBottom && isLeft) indices.push(d, c, b);
-      }
-
-    vertices.set([-1, 1, 0, 1, 1, 0, -1, -1, 0, 1, -1, 0], 3 * X * Y);
-    // the order will be: top-left, top-right, bottom-left, bottom-right
-    const corners: number[] = [
-      get1DIndex(0, Y - 1),
-      get1DIndex(X - 1, Y - 1),
-      get1DIndex(0, 0),
-      get1DIndex(X - 1, 0),
-    ];
-    const canvasCorners = [0, 1, 2, 3].map((vi) => vi + X * Y);
-    // Create triangles that extend the plane's corners to the canvas corners.
-    indices.push(canvasCorners[0], corners[1], canvasCorners[1]);
-    indices.push(corners[0], corners[1], canvasCorners[0]);
-    indices.push(canvasCorners[1], corners[3], canvasCorners[3]);
-    indices.push(corners[1], corners[3], canvasCorners[1]);
-    indices.push(canvasCorners[3], corners[2], canvasCorners[2]);
-    indices.push(corners[3], corners[2], canvasCorners[3]);
-    indices.push(canvasCorners[2], corners[0], canvasCorners[0]);
-    indices.push(corners[2], corners[0], canvasCorners[2]);
-
-    this.mesh.geometry.setIndex(indices);
-    this.mesh.geometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(vertices, 3)
-    );
-
-    let vertexShader = passThruVertexShader;
-    for (const input of inputs)
-      if (gpuComputeInputIsVarying(input)) {
-        const data = new Float32Array(vertices.length);
-        data.set(input.data);
-        const expand = (arr: number[]) =>
-          arr.map((el) => Array(input.itemSize).fill(el)).flat();
-        data.set(expand([0, 0, 0, 0]), input.data.length);
-        this.mesh.geometry.setAttribute(
-          "a_" + input.name,
-          new THREE.BufferAttribute(data, input.itemSize)
-        );
-
-        let attribType;
-        if (input.itemSize === 1) attribType = "float";
-        else if (1 < input.itemSize && input.itemSize < 5)
-          attribType = `vec${input.itemSize}`;
-        else if (input.itemSize >= 5) attribType = `float[${input.itemSize}]`;
-
-        vertexShader =
-          `attribute ${attribType} a_${input.name};\n` + vertexShader;
-        vertexShader =
-          `flat varying ${attribType} ${input.name};\n` + vertexShader;
-        const voidmainMatch = vertexShader
-          .matchAll(/void +main\(.*\) *{\s*/g)
-          .next().value;
-        const index = voidmainMatch.index + voidmainMatch[0].length;
-        vertexShader =
-          vertexShader.slice(0, index) +
-          `${input.name} = a_${input.name};\n    ` +
-          vertexShader.slice(index);
-      }
-
-    console.log(vertexShader);
-    this.mesh.material = new THREE.ShaderMaterial({
-      vertexShader: vertexShader,
-      fragmentShader: computeShader,
-    });
-    // prettier-ignore
-    this.mesh.material.defines!.resolution = 
-      `vec2(${this.sizeX.toFixed(1)}, ${this.sizeY.toFixed(1)})`;
-    for (const input of inputs)
-      if (gpuComputeInputIsTexture(input)) {
-        this.mesh.material.uniforms[input.name] = { value: input.texture };
-      }
-
-    this.renderTarget.setSize(this.sizeX, this.sizeY);
-    this.renderTarget.depthBuffer = false;
-    this.renderTarget.texture.minFilter = THREE.NearestFilter;
-    this.renderTarget.texture.magFilter = THREE.NearestFilter;
-    this.renderTarget.texture.needsUpdate = true; // just in case...
-
-    this.scene.add(this.mesh);
-    // this.compute();
-  }
-  compute() {
-    const currentRenderTarget = renderer.getRenderTarget();
-
-    const currentXrEnabled = renderer.xr.enabled;
-    const currentShadowAutoUpdate = renderer.shadowMap.autoUpdate;
-    const currentOutputColorSpace = renderer.outputColorSpace;
-    const currentToneMapping = renderer.toneMapping;
-
-    renderer.xr.enabled = false; // Avoid camera modification
-    renderer.shadowMap.autoUpdate = false; // Avoid re-computing shadows
-    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-    renderer.toneMapping = THREE.NoToneMapping;
-
-    renderer.setRenderTarget(this.renderTarget);
-    renderer.render(this.scene, this.camera);
-
-    renderer.xr.enabled = currentXrEnabled;
-    renderer.shadowMap.autoUpdate = currentShadowAutoUpdate;
-    renderer.outputColorSpace = currentOutputColorSpace;
-    renderer.toneMapping = currentToneMapping;
-
-    renderer.setRenderTarget(currentRenderTarget);
-  }
-  updateUniform(name: string, value: any) {
-    this.mesh.material.uniforms[name] ??= { value };
-    this.mesh.material.uniforms[name].value = value;
-  }
-}
-const passThruVertexShader = `
-void main() {
-    gl_Position = vec4(position, 1.0);
-}
-`;
 
 function initPositions(): THREE.DataTexture {
   const texture = initTexture(P);
@@ -398,9 +58,7 @@ function initPositions(): THREE.DataTexture {
 
 const gpuComputes: GPUCompute[] = Array(7);
 let positions: THREE.DataTexture;
-let velocities: THREE.DataTexture;
 
-let pReference: Float32Array;
 function init() {
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(WIDTH, HEIGHT);
@@ -409,39 +67,11 @@ function init() {
   container.appendChild(renderer.domElement);
 
   positions = initPositions();
-  velocities = initTexture(P);
   console.log(positions);
 
-  // prettier-ignore
-  gpuComputes[1] = new GPUCompute(P * 2, computeShader1Code, [
-    { name: "forcesTexture", texture: initTexture(P) },
-    { name: "positionsTexture", texture: positions },
-    { name: "velocitiesTexture", texture: velocities },
-    { name: "pReference", itemSize: 2, data: createTextureReference(P * 2, P) },
-    { name: "GPUC1_Mask", texture: initTexture(P * 2) },
+  gpuComputes[1] = new GPUCompute(P * 2, computeShader1Code, renderer, [
+    { name: "pReference", itemSize: 2, data: new Float32Array(P * 4) },
   ]);
-  pReference = gpuComputes[1].varInputs.pReference;
-  // ` * 4` for RGBA
-  gpuComputes[1].texInputs.GPUC1_Mask.image.data.set([
-    ...Array(P * 4).fill(1),
-    ...Array(P * 4).fill(2),
-  ]);
-  gpuComputes[1].texInputs.GPUC1_Mask.needsUpdate = true;
-  // gpuComputes[1] = new GPUCompute(P, positionShaderCode, [
-  //   {
-  //     name: "varyingPosition",
-  //     itemSize: 1,
-  //     data: new Float32Array(2 * N_PARTICLES),
-  //   },
-  // ]);
-  // const arr = new Float32Array(48);
-  // arr.set([-75, -75, -75, 75, 30, 20, -10, 75]);
-  // arr[16] = 75;
-  // arr[17] = -75;
-  // gpuComputes[1].inputs.varyingPosition = arr;
-  console.log(gpuComputes[1].texInputs.forcesTexture);
-
-  console.log(gpuComputes[1]);
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xffffff);
@@ -687,17 +317,32 @@ function render() {
   if (delta > 1) delta = 1; // Cut off for large delta values (experiment with number in future)
   last = now;
 
-  requestAnimationFrame(render);
-
   gpuComputes.forEach((gpuc) => gpuc.updateUniform("deltaT", delta));
+
+  const pReference = new Float32Array(P * 4);
+  const [texWidth, texHeight] = getSizeXY(P);
+  const canvasMultiple = 2;
+  for (let k = 0; k < canvasMultiple; k++)
+    for (let j = 0; j < texHeight; j++)
+      for (let i = 0; i < texWidth; i++)
+        pReference.set(
+          [(i + 0.5) / texWidth, (j + 0.5) / texHeight],
+          2 * (i + j * texWidth + k * texHeight * texWidth)
+        );
+  if (first) console.log(pReference, createTextureReference(P * 2, P));
+  const testPReference = createTextureReference(P * 2, P);
+  if (first) console.log(pReference.every((el, i) => el === testPReference[i]));
+
+  gpuComputes[1].varInputs.pReference = pReference;
+  if (first) console.log(pReference, pReference.length);
   gpuComputes[1].compute();
 
   particleUniforms["texturePosition"].value = positions;
-  // particleUniforms["texturePosition"].value =
-  //   gpuComputes[1].renderTarget.texture;
   if (first) {
     console.log(gpuComputes[1].sizeX, gpuComputes[1].sizeY);
-    const pixelBuffer = new Uint8Array(gpuComputes[1].sizeX * gpuComputes[1].sizeY * 4);
+    const pixelBuffer = new Uint8Array(
+      gpuComputes[1].sizeX * gpuComputes[1].sizeY * 4
+    );
     renderer.readRenderTargetPixels(
       gpuComputes[1].renderTarget,
       0,
@@ -720,7 +365,7 @@ function render() {
       recoveredArr[i] = bytesToFloat(pixelBuffer.slice(i * 4, (i + 1) * 4));
 
     for (let i = 0; i < targetArr.length; i++) {
-      if (i % 10 !== 0) continue;
+      // if (i % 10 !== 0) continue;
       let logOut = `${targetArr[i]} =|= ${recoveredArr[i]}`;
       if ((i + 1) % 32 === 0) logOut += " ⤣";
       if (targetArr[i] !== recoveredArr[i])
@@ -731,6 +376,7 @@ function render() {
 
   renderer.render(scene, camera);
   if (first) first = false;
+  requestAnimationFrame(render);
 }
 init();
 render();
