@@ -8,6 +8,7 @@ import {
   initTexture,
   createTextureReference,
   initMask,
+  isLittleEndianness,
 } from "./helper";
 
 import vertexShaderCode from "./shaders/vertex-shader.glsl";
@@ -21,6 +22,8 @@ const MAX_NEIGHBOURS = 64;
 const N_PARTICLES = 16 ** 2;
 const P = 2 * N_PARTICLES;
 const N = 2 * N_PARTICLES * MAX_NEIGHBOURS;
+
+console.log(`CPU is ${isLittleEndianness ? "little-endian" : "big-endian"}`);
 
 let posTexWidth: number, posTexHeight: number;
 [posTexWidth, posTexHeight] = getSizeXY(P);
@@ -130,6 +133,9 @@ function init() {
   renderer.setClearColor(0xdddddd, 1);
   renderer.setPixelRatio(window.devicePixelRatio);
   container.appendChild(renderer.domElement);
+
+  positions = initPositions();
+  console.log(positions);
 
   initGPUComputes();
 
@@ -305,9 +311,6 @@ let positions: THREE.DataTexture;
 let velocities: THREE.DataTexture;
 
 function initGPUComputes() {
-  positions = initPositions();
-  velocities = initTexture(P);
-
   // prettier-ignore
   gpuComputes[1] = new GPUCompute(P * 2, computeShader1Code, renderer, [
     { name: "forcesTexture", texture: initTexture(P) },
@@ -528,6 +531,7 @@ function render() {
       gpuCompute.sizeY,
       pixelBuffer
     );
+
     // prettier-ignore
     const pixelBufferFloats = Array(...pixelBuffer).map((_el, i) =>
       i % 4 === 0 ? bytesToFloat(pixelBuffer.slice(i, i + 4)) : 0

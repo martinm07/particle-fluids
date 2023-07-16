@@ -19,7 +19,6 @@ export const bytesToFloat = function (bytes: Uint8Array) {
 };
 export const isLittleEndianness =
   bytesToFloat(new Uint8Array([0, 0, 224, 191])) === -1.75;
-console.log(`CPU is ${isLittleEndianness ? "little-endian" : "big-endian"}`);
 
 // helper variables
 const fArr = new Float32Array(1);
