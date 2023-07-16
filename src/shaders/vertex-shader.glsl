@@ -2,6 +2,7 @@ attribute vec2 referenceX;
 attribute vec2 referenceY;
 
 uniform sampler2D texturePosition;
+uniform float pixelScale;
 
 // As it turns out, since WebGL 2.0 (which is based on OpenGL ES 3.0, as opposed to OpenGL ES 2.0),
 //  there is already a function that does this, namely "uintBitsToFloat", and the reverse ("floatBitsToUint").
@@ -54,6 +55,6 @@ void main() {
     float yPos = interpretBytesVector(posYBytes);
 
     vec3 newPosition = position;
-    newPosition += vec3(xPos, yPos, 0.0);
+    newPosition += vec3(xPos * pixelScale, yPos * pixelScale, 0.0);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
 }

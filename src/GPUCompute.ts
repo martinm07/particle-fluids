@@ -1,20 +1,31 @@
 import * as THREE from "three";
-import { getSizeXY } from "./helper";
+import { getSizeXY, initTexture } from "./helper";
 
 interface GPUComputeInputTexture {
   name: string;
-  texture: THREE.DataTexture;
+  texture: THREE.Texture;
 }
 interface GPUComputeInputVarying {
   name: string;
   itemSize: number;
   data: Float32Array;
 }
+
+interface GPUComputeConstructTexture {
+  name: string;
+  texture?: THREE.Texture;
+}
+interface GPUComputeConstructVarying {
+  name: string;
+  itemSize: number;
+  data?: Float32Array;
+}
+
 interface GPUComputeVarInputs {
   [key: string | symbol]: Float32Array;
 }
 interface GPUComputeTexInputs {
-  [key: string | symbol]: THREE.DataTexture;
+  [key: string | symbol]: THREE.Texture;
 }
 const gpuComputeInputIsTexture = (
   input: GPUComputeInputTexture | GPUComputeInputVarying
@@ -27,7 +38,19 @@ const gpuComputeInputIsVarying = (
   return "itemSize" in input;
 };
 
+const gpuComputeConstructerIsTexture = (
+  input: GPUComputeConstructTexture | GPUComputeConstructVarying
+): input is GPUComputeConstructTexture => {
+  return !("itemSize" in input);
+};
+const gpuComputeConstructerIsVarying = (
+  input: GPUComputeConstructTexture | GPUComputeConstructVarying
+): input is GPUComputeConstructVarying => {
+  return "itemSize" in input;
+};
+
 export class GPUCompute {
+  length: number;
   sizeX: number;
   sizeY: number;
   scene: THREE.Scene;
@@ -44,12 +67,25 @@ export class GPUCompute {
     numComputes: number,
     computeShader: string,
     renderer: THREE.WebGLRenderer,
-    inputs: Array<GPUComputeInputTexture | GPUComputeInputVarying>
+    inputs: Array<GPUComputeConstructTexture | GPUComputeConstructVarying>
   ) {
+    this.length = numComputes;
     this.renderer = renderer;
     [this.sizeX, this.sizeY] = getSizeXY(numComputes);
 
-    this._inputs = inputs;
+    const _inputs: Array<GPUComputeInputTexture | GPUComputeInputVarying> = [];
+    for (const input of inputs) {
+      const _input = Object.assign({}, input);
+      if (gpuComputeConstructerIsVarying(_input) && !_input.data) {
+        _input.data = new Float32Array(numComputes * _input.itemSize);
+      }
+      if (gpuComputeConstructerIsTexture(_input) && !_input.texture) {
+        _input.texture = initTexture(numComputes);
+      }
+      _inputs.push(_input as GPUComputeInputTexture | GPUComputeInputVarying);
+    }
+    this._inputs = _inputs;
+
     for (let i = 0; i < inputs.length; i++)
       this._inputIndices[inputs[i].name] = i;
     this.varInputs = new Proxy<GPUComputeVarInputs>(
@@ -87,7 +123,7 @@ export class GPUCompute {
           if (!(prop in this._inputIndices)) return false;
           const input = this._inputs[this._inputIndices[prop]];
           if (!gpuComputeInputIsTexture(input)) return false;
-          if (!(value instanceof THREE.DataTexture)) return false;
+          if (!(value instanceof THREE.Texture)) return false;
           this.mesh.material.uniforms[String(prop)] = { value };
           this.mesh.material.needsUpdate = true;
           input.texture = value;
@@ -124,7 +160,7 @@ export class GPUCompute {
         let fragCenterX = (2 * i) / X + 1 / X - 1;
         let fragCenterY = (2 * j) / Y + 1 / Y - 1;
         // This is to nudge WebGL to which primitive around the vertex the fragment falls in.
-        const EPSILON = 0.001;
+        const EPSILON = 0.01;
 
         const isTop = j === Y - 1;
         const isRight = i === X - 1;
@@ -199,9 +235,9 @@ export class GPUCompute {
     );
 
     let vertexShader = passThruVertexShader;
-    for (const input of inputs)
+    for (const input of _inputs)
       if (gpuComputeInputIsVarying(input)) {
-        const data = new Float32Array(vertices.length);
+        const data = new Float32Array((numComputes + 4) * input.itemSize);
         data.set(input.data);
         const expand = (arr: number[]) =>
           arr.map((el) => Array(input.itemSize).fill(el)).flat();
@@ -215,7 +251,10 @@ export class GPUCompute {
         if (input.itemSize === 1) attribType = "float";
         else if (1 < input.itemSize && input.itemSize < 5)
           attribType = `vec${input.itemSize}`;
-        else if (input.itemSize >= 5) attribType = `float[${input.itemSize}]`;
+        else if (input.itemSize >= 5)
+          throw new Error(
+            `Attributes larger than a \`vec4\` not allowed. Got ${input.itemSize}.`
+          );
 
         vertexShader =
           `attribute ${attribType} a_${input.name};\n` + vertexShader;
@@ -231,7 +270,7 @@ export class GPUCompute {
           vertexShader.slice(index);
       }
 
-    console.log(vertexShader);
+    // console.log(vertexShader);
     this.mesh.material = new THREE.ShaderMaterial({
       vertexShader: vertexShader,
       fragmentShader: computeShader,
@@ -239,7 +278,7 @@ export class GPUCompute {
     // prettier-ignore
     this.mesh.material.defines!.resolution = 
         `vec2(${this.sizeX.toFixed(1)}, ${this.sizeY.toFixed(1)})`;
-    for (const input of inputs)
+    for (const input of _inputs)
       if (gpuComputeInputIsTexture(input)) {
         this.mesh.material.uniforms[input.name] = { value: input.texture };
       }
