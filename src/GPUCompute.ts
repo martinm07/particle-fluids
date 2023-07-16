@@ -123,25 +123,48 @@ export class GPUCompute {
       for (let j = 0; j < Y; j++) {
         let fragCenterX = (2 * i) / X + 1 / X - 1;
         let fragCenterY = (2 * j) / Y + 1 / Y - 1;
-        // This is to nudge WebGL to which primitive around the vertex the fragment falls in.
-        const EPSILON = 0.001;
 
         const isTop = j === Y - 1;
         const isRight = i === X - 1;
         const isBottom = j === 0;
         const isLeft = i === 0;
-        const adjust = (xEpsilon: number, yEpsilon: number) => {
-          fragCenterX += xEpsilon;
-          fragCenterY += yEpsilon;
+
+        // To explain the options for `triangle`, look at the six triangles
+        //  around a point in the tesselated plane: https://imgur.com/MQDkU6g
+        const adjust = (triangle: string) => {
+          // This is the width and height of a single fragment (pixel),
+          //  and thus the width and height of the triangles.
+          const W = 2 / X,
+            H = 2 / Y;
+          const nudgeTo = (
+            triangleCenterX: number,
+            triangleCenterY: number
+          ) => {
+            fragCenterX -= triangleCenterX;
+            fragCenterY -= triangleCenterY;
+          };
+
+          // These calculations come from the centroid of a triangle being
+          //  ((x1 + x2 + x3) / 3, (y1, y2, y3) / 3)
+          if (triangle === "bottom-left") nudgeTo(-W / 3, -H / 3);
+          else if (triangle === "top-right") nudgeTo(W / 3, H / 3);
+          else if (triangle === "top-left-left") nudgeTo((-2 * W) / 3, H / 3);
+          else if (triangle === "top-left-right") nudgeTo(-W / 3, (2 * H) / 3);
+          else if (triangle === "bottom-right-left")
+            nudgeTo(W / 3, (-2 * H) / 3);
+          else if (triangle === "bottom-right-right")
+            nudgeTo((2 * W) / 3, -H / 3);
+          else {
+            throw new Error(`\`triangle\` not recognized. Got: "${triangle}"`);
+          }
         };
 
-        if (isBottom && i === 1) adjust(0.5 * EPSILON, -EPSILON);
-        else if (isTop && i === X - 2) adjust(-0.5 * EPSILON, EPSILON);
-        else if (isBottom && !isLeft) adjust(EPSILON, -0.5 * EPSILON);
-        else if (isTop && !isRight) adjust(-EPSILON, 0.5 * EPSILON);
-        else if (isRight || (i === X - 2 && j === Y - 2))
-          adjust(EPSILON, EPSILON);
-        else adjust(-EPSILON, -EPSILON);
+        if (isBottom && i === 1) adjust("top-left-right");
+        else if (isTop && i === X - 2) adjust("bottom-right-left");
+        else if (isBottom && !isLeft) adjust("top-left-left");
+        else if (isTop && !isRight) adjust("bottom-right-right");
+        else if (isRight || (i === X - 2 && j === Y - 2)) adjust("bottom-left");
+        else adjust("top-right");
 
         vertices.set([fragCenterX, fragCenterY, 0], 3 * get1DIndex(i, j));
       }
