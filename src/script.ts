@@ -4,6 +4,7 @@ import vertexShaderCode from "./shaders/vertex-shader.glsl";
 import fragmentShaderCode from "./shaders/fragment-shader.glsl";
 // import positionShaderCode from "./shaders/positionComputeShader.glsl";
 import computeShader1Code from "./shaders/compute-shader-1.glsl";
+import computeShader2Code from "./shaders/compute-shader-2.glsl";
 import { GPUCompute } from "./GPUCompute";
 import {
   bytesToFloat,
@@ -11,7 +12,6 @@ import {
   floatToBytesArray,
   getSizeXY,
   initTexture,
-  createTextureReference,
 } from "./helper";
 
 // 80 * 128
@@ -69,9 +69,7 @@ function init() {
   positions = initPositions();
   console.log(positions);
 
-  gpuComputes[1] = new GPUCompute(P * 2, computeShader1Code, renderer, [
-    { name: "pReference", itemSize: 2, data: new Float32Array(P * 4) },
-  ]);
+  initGPUComputes();
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xffffff);
@@ -309,6 +307,18 @@ function initParticleRenders() {
   scene.add(particleMesh);
 }
 
+const gpuc1Len = 5 * 293;
+function initGPUComputes() {
+  gpuComputes[1] = new GPUCompute(gpuc1Len, computeShader1Code, renderer, [
+    { name: "pReference", itemSize: 2, data: new Float32Array(gpuc1Len * 2) },
+  ]);
+
+  gpuComputes[2] = new GPUCompute(4125, computeShader2Code, renderer, []);
+}
+
+const xStarBytes = new Uint8Array(P * 4);
+// const xStar = new Float32Array(xStarBytes.buffer);
+
 let last = performance.now();
 let first = true;
 function render() {
@@ -319,9 +329,16 @@ function render() {
 
   gpuComputes.forEach((gpuc) => gpuc.updateUniform("deltaT", delta));
 
-  const pReference = new Float32Array(P * 4);
-  const [texWidth, texHeight] = getSizeXY(P);
-  const canvasMultiple = 2;
+  gpuComputes[2].compute();
+  // prettier-ignore
+  renderer.readRenderTargetPixels(
+    gpuComputes[2].renderTarget, 0, 16, 32, 16, xStarBytes
+  );
+  if (first) console.log(xStarBytes);
+
+  const pReference = new Float32Array(gpuc1Len * 2);
+  const [texWidth, texHeight] = getSizeXY(gpuc1Len);
+  const canvasMultiple = 1;
   for (let k = 0; k < canvasMultiple; k++)
     for (let j = 0; j < texHeight; j++)
       for (let i = 0; i < texWidth; i++)
@@ -329,33 +346,26 @@ function render() {
           [(i + 0.5) / texWidth, (j + 0.5) / texHeight],
           2 * (i + j * texWidth + k * texHeight * texWidth)
         );
-  if (first) console.log(pReference, createTextureReference(P * 2, P));
-  const testPReference = createTextureReference(P * 2, P);
-  if (first) console.log(pReference.every((el, i) => el === testPReference[i]));
+  if (first) console.log(pReference);
 
   gpuComputes[1].varInputs.pReference = pReference;
-  if (first) console.log(pReference, pReference.length);
+
   gpuComputes[1].compute();
 
   particleUniforms["texturePosition"].value = positions;
   if (first) {
+    console.log("------------------------");
     console.log(gpuComputes[1].sizeX, gpuComputes[1].sizeY);
-    const pixelBuffer = new Uint8Array(
-      gpuComputes[1].sizeX * gpuComputes[1].sizeY * 4
-    );
+    const gpuCompute = gpuComputes[1];
+    const pixelBuffer = new Uint8Array(gpuCompute.sizeX * gpuCompute.sizeY * 4);
     renderer.readRenderTargetPixels(
-      gpuComputes[1].renderTarget,
+      gpuCompute.renderTarget,
       0,
       0,
-      gpuComputes[1].sizeX,
-      gpuComputes[1].sizeY,
+      gpuCompute.sizeX,
+      gpuCompute.sizeY,
       pixelBuffer
     );
-    // prettier-ignore
-    const pixelBufferFloats = Array(...pixelBuffer).map((_el, i) =>
-      i % 4 === 0 ? bytesToFloat(pixelBuffer.slice(i, i + 4)) : 0
-    ).filter((_el, i) => i % 4 === 0);
-    console.log(pixelBufferFloats);
 
     // Test y (or x) values of pReference for gpuComputes[1]
     // `compute-shader-1.glsl` must set `gl_FragColor = interpretFloat(pReference.y);`
@@ -364,14 +374,20 @@ function render() {
     for (let i = 0; i < pixelBuffer.length / 4; i++)
       recoveredArr[i] = bytesToFloat(pixelBuffer.slice(i * 4, (i + 1) * 4));
 
+    console.log(targetArr);
+    console.log(recoveredArr);
+
+    let errors = 0;
     for (let i = 0; i < targetArr.length; i++) {
       // if (i % 10 !== 0) continue;
       let logOut = `${targetArr[i]} =|= ${recoveredArr[i]}`;
       if ((i + 1) % 32 === 0) logOut += " ⤣";
-      if (targetArr[i] !== recoveredArr[i])
-        console.log(`${i}: ` + "%c" + logOut, "color: red");
-      else console.log(`${i}: ` + logOut);
+      if (targetArr[i] !== recoveredArr[i]) {
+        errors += 1;
+        // console.log(`${i}: ` + "%c" + logOut, "color: red");
+      } // else console.log(`${i}: ` + logOut);
     }
+    console.log(`Errors: ${errors}`);
   }
 
   renderer.render(scene, camera);

@@ -231,7 +231,6 @@ export class GPUCompute {
           vertexShader.slice(index);
       }
 
-    console.log(vertexShader);
     this.mesh.material = new THREE.ShaderMaterial({
       vertexShader: vertexShader,
       fragmentShader: computeShader,
