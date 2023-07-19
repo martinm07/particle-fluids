@@ -146,14 +146,14 @@ export class GPUCompute {
     //  to be properly positioned so that we don't end up interpolating the values from multiple.
     this.mesh.geometry = new THREE.BufferGeometry();
     // +4 is for four vertices positioned at the corners, (-1, 1), (1, 1), (-1, -1) and (1, -1).
-    // These are normalized coordinates to mean that that the geometry will cover the entire canvas,
+    // These are normalized coordinates to mean that the geometry will cover the entire canvas,
     //  which we need to do so that it rasterizes the whole canvas and generate calls to the fragment
     //  shader for every pixel along the canvas' height and width.
     // Here's a diagram that visualises the intent: https://imgur.com/a/rZr9jrh
     const vertices = new Float32Array((numComputes + 4) * 3);
     const X = this.sizeX,
       Y = this.sizeY;
-    // Ordering it this way means it reads top to bottom, left to right
+    // Ordering it this way means it reads bottom to top, left to right
     const get1DIndex = (i: number, j: number) => i + j * X;
     for (let i = 0; i < X; i++)
       for (let j = 0; j < Y; j++) {
@@ -176,12 +176,13 @@ export class GPUCompute {
             triangleCenterX: number,
             triangleCenterY: number
           ) => {
-            fragCenterX -= triangleCenterX;
-            fragCenterY -= triangleCenterY;
+            const SCALE = 0.1;
+            fragCenterX -= SCALE * triangleCenterX;
+            fragCenterY -= SCALE * triangleCenterY;
           };
 
           // These calculations come from the centroid of a triangle being
-          //  ((x1 + x2 + x3) / 3, (y1, y2, y3) / 3)
+          //  ((x1 + x2 + x3) / 3, (y1 + y2 + y3) / 3)
           if (triangle === "bottom-left") nudgeTo(-W / 3, -H / 3);
           else if (triangle === "top-right") nudgeTo(W / 3, H / 3);
           else if (triangle === "top-left-left") nudgeTo((-2 * W) / 3, H / 3);
@@ -262,9 +263,11 @@ export class GPUCompute {
       if (gpuComputeInputIsVarying(input)) {
         const data = new Float32Array((numComputes + 4) * input.itemSize);
         data.set(input.data);
+        // Set the varying values of the 4 canvas corner vertices to 0
         const expand = (arr: number[]) =>
           arr.map((el) => Array(input.itemSize).fill(el)).flat();
         data.set(expand([0, 0, 0, 0]), input.data.length);
+
         this.mesh.geometry.setAttribute(
           "a_" + input.name,
           new THREE.BufferAttribute(data, input.itemSize)

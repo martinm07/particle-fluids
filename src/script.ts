@@ -86,10 +86,10 @@ class ParticleGeometry extends THREE.BufferGeometry {
       const particleIndex = Math.trunc(v / (points / N_PARTICLES));
       const refXx = ((particleIndex * 2) % posTexWidth) / posTexWidth;
       const refXy =
-        Math.trunc((particleIndex * 2) / posTexHeight) / posTexHeight;
+        Math.trunc((particleIndex * 2) / posTexWidth) / posTexHeight;
       const refYx = ((particleIndex * 2 + 1) % posTexWidth) / posTexWidth;
       const refYy =
-        Math.trunc((particleIndex * 2 + 1) / posTexHeight) / posTexHeight;
+        Math.trunc((particleIndex * 2 + 1) / posTexWidth) / posTexHeight;
 
       referencesX.set([refXx, refXy], v * 2);
       referencesY.set([refYx, refYy], v * 2);
@@ -296,10 +296,10 @@ function initPositions(): THREE.DataTexture {
     let num: number;
     if (i % 2 === 0) {
       // x coordinate
-      num = (i % 20) * 0.5 - 5;
+      num = (i % 30) * 0.5 - 7.5;
     } else {
       // y coordinate
-      num = Math.floor(i / 20) * 1;
+      num = Math.floor(i / 30) * 1;
     }
     theArray.set(floatToBytesArray(num), i * 4);
   }
@@ -319,7 +319,6 @@ function initGPUComputes() {
     { name: "pReference", itemSize: 2, data: createTextureReference(P * 2, P) },
     { name: "GPUC1_Mask", texture: initMask(P, 2) },
   ]);
-  console.log(gpuComputes[1]);
 
   // x/y components combined, and for every p_ij there's a redundant p_ji, thus `... / 2 / 2`, or `... / 4`
   gpuComputes[3] = new GPUCompute((N / 4) * 5, computeShader3Code, renderer, [
@@ -346,23 +345,38 @@ function initGPUComputes() {
     { name: "GPUC3_Out", texture: initTexture((N / 4) * 5) },
     { name: "pRefN_startIndex", itemSize: 1 },
     { name: "pRefN_Length", itemSize: 1 },
+    { name: "numExtras", itemSize: 1 },
     { name: "pRefN", texture: pRefN },
   ]);
   gpuComputes[4].updateUniform("NUL", NUL);
+  gpuComputes[4].updateUniform("h", KERNEL_WIDTH);
   gpuComputes[4].updateUniform("restDensity", REST_DENSITY);
   gpuComputes[4].updateUniform("constraintRelaxation", CONSTRAINT_RELAXATION);
+  gpuComputes[4].updateUniform("APk", ARTIFICIAL_PRESSURE_SCALE);
   gpuComputes[4].updateUniform(
-    "nResolution",
+    "APdeltaQ",
+    ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE
+  );
+  gpuComputes[4].updateUniform("APn", ARTIFICIAL_PRESSURE_POWER);
+  gpuComputes[4].updateUniform("N", N);
+  gpuComputes[4].updateUniform(
+    "nRefResolution",
     new Float32Array([pRefNsizeX, pRefNsizeY])
   );
-  console.log(gpuComputes[4].sizeX, gpuComputes[4].sizeY);
+  gpuComputes[4].updateUniform(
+    "nResolution",
+    new Float32Array([gpuComputes[3].sizeX, gpuComputes[3].sizeY])
+  );
 }
 
 const PIXEL_SCALE = 4;
 const GRIDSIZE = 1;
-const KERNEL_WIDTH = 1.32;
+const KERNEL_WIDTH = 2;
 const REST_DENSITY = 0.85;
 const CONSTRAINT_RELAXATION = 2.2;
+const ARTIFICIAL_PRESSURE_SCALE = 0.045;
+const ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE = 0.07 * KERNEL_WIDTH;
+const ARTIFICIAL_PRESSURE_POWER = 4;
 
 type GridMap = Map<string, number[]>;
 let gridMap: GridMap;
@@ -397,9 +411,9 @@ function findNeighbouringParticles(
 
 const xStarBytes = new Uint8Array(P * 4);
 const xStar = new Float32Array(xStarBytes.buffer);
-// const pRefNBytes = new Uint8Array(N * 4);
-const pRefNData = new Float32Array(N * 2);
-const [pRefNsizeX, pRefNsizeY] = getSizeXY(N);
+
+const pRefNData = new Float32Array(N);
+const [pRefNsizeX, pRefNsizeY] = getSizeXY(N / 2);
 const pRefN = new THREE.DataTexture(
   pRefNData,
   pRefNsizeX,
@@ -440,6 +454,7 @@ function render() {
   //  to be expressed by one or two numbers.
   const pRefN_startIndex = new Float32Array(P);
   const pRefN_Length = new Float32Array(P);
+  const numExtras = new Float32Array(P);
 
   let accumIndex = 0;
   let accumIndexFull = 0;
@@ -452,8 +467,8 @@ function render() {
 
     // prettier-ignore
     const texCoordsConstructor = (gpuCompute: GPUCompute, i: number, yOffset = 0.) => [
-      (i % gpuCompute.sizeX) / gpuCompute.sizeX,
-      Math.trunc(i / gpuCompute.sizeY) / gpuCompute.sizeY + yOffset,
+      ((i % gpuCompute.sizeX) + 0.5) / gpuCompute.sizeX,
+      (Math.trunc(i / gpuCompute.sizeX) + 0.5) / gpuCompute.sizeY + yOffset,
     ];
 
     const texCoords = texCoordsConstructor.bind(null, gpuComputes[1]);
@@ -490,17 +505,26 @@ function render() {
 
     const nRefFull = [...nIDs, ...extraIDs].flatMap((id_) => texNCoords(id_));
 
+    pRefN_startIndex.set([accumIndexFull / 2], i);
+    pRefN_Length.set([nRefFull.length / 2], i);
+    numExtras.set([extraIDs.length], i);
     pRefNData.set(nRefFull, accumIndexFull);
-    pRefN_startIndex.set(Array(2).fill(accumIndexFull / 2), i * 2);
-    pRefN_Length[i * 2] = nRefFull.length;
-    pRefN_Length[i * 2 + 1] = nRefFull.length;
+    pRefN.needsUpdate = true;
 
     accumIndex += allNeighbours[i].length * 2;
-    accumIndexFull += nRefFull.length * 2;
+    accumIndexFull += nRefFull.length;
   }
+  // Copy the varying values into each part of the mask
+  // GPUC3
   for (let k = 1; k < 5; k++) {
     Object.entries(gpuc3References).forEach(([_name, data]) =>
       data.set(data.slice(0, N / 2), k * (N / 2))
+    );
+  }
+  // GPUC4
+  for (let k = 1; k < 2; k++) {
+    [pRefN_startIndex, pRefN_Length, numExtras].forEach((var_) =>
+      var_.set(var_.slice(0, P / 2), k * (P / 2))
     );
   }
 
@@ -513,13 +537,16 @@ function render() {
 
   gpuComputes[4].varInputs.pRefN_startIndex = pRefN_startIndex;
   gpuComputes[4].varInputs.pRefN_Length = pRefN_Length;
+  gpuComputes[4].varInputs.numExtras = numExtras;
+  gpuComputes[4].texInputs.pRefN = pRefN;
+  gpuComputes[4].texInputs.GPUC3_Out = gpuComputes[3].renderTarget.texture;
 
   gpuComputes[4].compute();
 
   particleUniforms["texturePosition"].value = positions;
   if (first) {
     console.log("------------------------");
-    const gpuCompute = gpuComputes[3];
+    const gpuCompute = gpuComputes[4];
 
     console.log(gpuCompute.sizeX, gpuCompute.sizeY);
     const pixelBuffer = new Uint8Array(gpuCompute.sizeX * gpuCompute.sizeY * 4);
