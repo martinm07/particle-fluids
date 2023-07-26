@@ -93,6 +93,7 @@ void main() {
         sum_dCi2 += pow(dpi_Ci.x, 2.0) + pow(dpi_Ci.y, 2.0);
         float lambda = C_i / (sum_dCi2 + constraintRelaxation);
         gl_FragColor = interpretFloat(lambda);
+    // ∑ⱼ(sCorr∇W(pᵢ - pⱼ))
     } else if (mask == 2.0) {
         // s_corr
         float APqW = (315.0 / (64.0 * PI * pow(h, 9.0))) * pow(pow(h, 2.0) - pow(APdeltaQ, 2.0), 3.0);
@@ -102,7 +103,29 @@ void main() {
             vec2 coord = texture2D(pRefN, refCoord).xy;
             float W_ij = interpretBytesVector(texture2D(GPUC3_Out, coord).xyzw);
 
-            s_corr += -1.0 * APk * pow(W_ij / APqW, APn);
+            vec2 indexCoord = coord * nResolution - 0.5;
+            float index = indexCoord.x + indexCoord.y * nResolution.x;
+            vec2 dWx_coord = getCoord(index + (N / 4.0), nResolution);
+            float dWi_x = interpretBytesVector(texture2D(GPUC3_Out, dWx_coord).xyzw);
+
+            s_corr += -1.0 * APk * pow(W_ij / APqW, APn) * dWi_x;
+        }
+        gl_FragColor = interpretFloat(s_corr);
+    } else if (mask == 3.0) {
+        // s_corr
+        float APqW = (315.0 / (64.0 * PI * pow(h, 9.0))) * pow(pow(h, 2.0) - pow(APdeltaQ, 2.0), 3.0);
+        float s_corr = 0.0;
+        for (float j = 0.0; j < pRefN_Length; j++) {
+            vec2 refCoord = getCoord(pRefN_startIndex + j, nRefResolution);
+            vec2 coord = texture2D(pRefN, refCoord).xy;
+            float W_ij = interpretBytesVector(texture2D(GPUC3_Out, coord).xyzw);
+
+            vec2 indexCoord = coord * nResolution - 0.5;
+            float index = indexCoord.x + indexCoord.y * nResolution.x;
+            vec2 dWy_coord = getCoord(index + 2.0 * N / 4.0, nResolution);
+            float dWi_y = interpretBytesVector(texture2D(GPUC3_Out, dWy_coord).xyzw);
+
+            s_corr += -1.0 * APk * pow(W_ij / APqW, APn) * dWi_y;
         }
         gl_FragColor = interpretFloat(s_corr);
     }
