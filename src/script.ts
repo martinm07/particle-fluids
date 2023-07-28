@@ -334,7 +334,7 @@ function initGPUComputes() {
     { name: "p_i", itemSize: 2 },
     { name: "p_j", itemSize: 2 },
     { name: "GPUC3_Mask", texture: initMask(N / 4, 5) },
-    { name: "GPUC1_Out" },
+    { name: "xStarAndVelocity" },
     { name: "pi_xReference", itemSize: 2 },
     { name: "pi_yReference", itemSize: 2 },
     { name: "pj_xReference", itemSize: 2 },
@@ -368,17 +368,9 @@ function initGPUComputes() {
   );
   gpuComputes[4].updateUniform("APn", ARTIFICIAL_PRESSURE_POWER);
   gpuComputes[4].updateUniform("N", N);
-  gpuComputes[4].updateUniform(
-    "nRefResolution",
-    new Float32Array([pRefNsizeX, pRefNsizeY])
-  );
-  gpuComputes[4].updateUniform(
-    "nResolution",
-    new Float32Array([gpuComputes[3].sizeX, gpuComputes[3].sizeY])
-  );
 
-  gpuComputes[5] = new GPUCompute(P, computeShader5Code, renderer, [
-    { name: "GPUC5_Mask", texture: initMask(P / 2, 2) },
+  gpuComputes[5] = new GPUCompute(P * 2, computeShader5Code, renderer, [
+    { name: "GPUC5_Mask", texture: initMask(P, 2) },
     { name: "GPUC3_Out" },
     { name: "GPUC4_Out" },
     { name: "pRefN_startIndex", itemSize: 1 },
@@ -388,33 +380,34 @@ function initGPUComputes() {
     { name: "lambdaRef", itemSize: 2 },
     { name: "sCorr_xRef", itemSize: 2 },
     { name: "sCorr_yRef", itemSize: 2 },
-    { name: "xStar", itemSize: 2 },
+    { name: "xStarAndVelocity" },
     { name: "X" },
   ]);
   gpuComputes[5].updateUniform("NUL", NUL);
   gpuComputes[5].updateUniform("lineBounds", lineBounds);
   gpuComputes[5].updateUniform("restDensity", REST_DENSITY);
   gpuComputes[5].updateUniform("N", N);
-  gpuComputes[5].updateUniform(
-    "pRes",
-    new Float32Array([posTexWidth, posTexHeight])
-  );
-  gpuComputes[5].updateUniform(
-    "nRefResolution",
-    new Float32Array([pRefNsizeX, pRefNsizeY])
-  );
-  gpuComputes[5].updateUniform(
-    "nResolution",
-    new Float32Array([gpuComputes[3].sizeX, gpuComputes[3].sizeY])
-  );
-  gpuComputes[5].updateUniform(
-    "c4Resolution",
-    new Float32Array([gpuComputes[4].sizeX, gpuComputes[4].sizeY])
-  );
+
+  // Provide all texture resolutions for all shaders
+  const computeIDs = gpuComputes.map((_el, i) => i).flat();
+  for (const i of computeIDs) {
+    for (const c of computeIDs) {
+      if (c === i) continue;
+      gpuComputes[i].updateUniform(
+        `c${c}Resolution`,
+        new Float32Array([gpuComputes[c].sizeX, gpuComputes[c].sizeY])
+      );
+    }
+    // prettier-ignore
+    gpuComputes[i].updateUniform("pRes", new Float32Array([posTexWidth, posTexHeight]));
+    // prettier-ignore
+    gpuComputes[i].updateUniform("nRefRes", new Float32Array([pRefNsizeX, pRefNsizeY]));
+  }
 }
 
 const PIXEL_SCALE = 4;
 const GRIDSIZE = 1;
+const SOLVER_ITERATIONS = 3;
 const KERNEL_WIDTH = 2;
 const REST_DENSITY = 0.85;
 const CONSTRAINT_RELAXATION = 2.2;
@@ -606,17 +599,10 @@ function render() {
   Object.entries(gpuc3References).forEach(
     ([name, data]) => (gpuComputes[3].varInputs[name + "Reference"] = data)
   );
-  // For the multiple solver iterations, after the first one this should be `gpuComputes[5].renderTarget.texture`
-  gpuComputes[3].texInputs.GPUC1_Out = gpuComputes[1].renderTarget.texture;
-
-  gpuComputes[3].compute();
 
   gpuComputes[4].varInputs.pRefN_startIndex = pRefN_startIndex;
   gpuComputes[4].varInputs.pRefN_Length = pRefN_Length;
   gpuComputes[4].varInputs.numExtras = numExtras;
-  gpuComputes[4].texInputs.GPUC3_Out = gpuComputes[3].renderTarget.texture;
-
-  gpuComputes[4].compute();
 
   const toC5Range = (arr: Float32Array) =>
     arr.slice(0, P).map((_, i) => arr[Math.trunc(i / 2)]);
@@ -625,14 +611,26 @@ function render() {
   gpuComputes[5].varInputs.lambdaRef = lambdaRef;
   gpuComputes[5].varInputs.sCorr_xRef = sCorr_xRef;
   gpuComputes[5].varInputs.sCorr_yRef = sCorr_yRef;
-  gpuComputes[5].texInputs.GPUC3_Out = gpuComputes[3].renderTarget.texture;
-  gpuComputes[5].texInputs.GPUC4_Out = gpuComputes[4].renderTarget.texture;
-  gpuComputes[5].varInputs.xStar = new Float32Array(P * 2).map(
-    (_, i) => xStar[(i % 2) + 2 * Math.trunc(i / 4)]
-  );
   gpuComputes[5].texInputs.X = positions;
 
-  gpuComputes[5].compute();
+  let xStarAndVelocity = gpuComputes[1].renderTarget.texture;
+  for (let _ = 0; _ < SOLVER_ITERATIONS; _++) {
+    gpuComputes[3].texInputs.xStarAndVelocity = xStarAndVelocity;
+    gpuComputes[3].compute();
+
+    gpuComputes[4].texInputs.GPUC3_Out = gpuComputes[3].renderTarget.texture;
+    gpuComputes[4].compute();
+
+    gpuComputes[5].texInputs.GPUC3_Out = gpuComputes[3].renderTarget.texture;
+    gpuComputes[5].texInputs.GPUC4_Out = gpuComputes[4].renderTarget.texture;
+    gpuComputes[5].texInputs.xStarAndVelocity = xStarAndVelocity;
+    gpuComputes[5].compute();
+
+    xStarAndVelocity = gpuComputes[5].renderTarget.texture.clone();
+    // Since we're cloning specifically the texture, we need to do this. See
+    //  https://github.com/mrdoob/three.js/issues/20328#issuecomment-1069257169
+    xStarAndVelocity.isRenderTargetTexture = true;
+  }
 
   particleUniforms["texturePosition"].value = positions;
   if (first) {

@@ -1,8 +1,6 @@
 #define PI 3.1415926538
 #define EPSILON 0.0001
 
-// flat varying vec2 p_i;
-// flat varying vec2 p_j;
 flat varying vec2 pi_xReference;
 flat varying vec2 pi_yReference;
 flat varying vec2 pj_xReference;
@@ -15,7 +13,7 @@ uniform float h;
 uniform float NUL;
 
 uniform sampler2D GPUC3_Mask;
-uniform sampler2D GPUC1_Out;
+uniform sampler2D xStarAndVelocity;
 
 float interpretBytesVector(vec4 bytes) {
     bytes *= 255.0;
@@ -45,20 +43,20 @@ void main() {
     vec2 uv = gl_FragCoord.xy / resolution.xy;
     float mask = texture2D(GPUC3_Mask, uv).x * 255.0;
 
-    float pi_x = interpretBytesVector(texture2D(GPUC1_Out, pi_xReference).xyzw);
-    float pi_y = interpretBytesVector(texture2D(GPUC1_Out, pi_yReference).xyzw);
+    float pi_x = interpretBytesVector(texture2D(xStarAndVelocity, pi_xReference).xyzw);
+    float pi_y = interpretBytesVector(texture2D(xStarAndVelocity, pi_yReference).xyzw);
     vec2 p_i = vec2(pi_x, pi_y);
 
-    float pj_x = interpretBytesVector(texture2D(GPUC1_Out, pj_xReference).xyzw);
-    float pj_y = interpretBytesVector(texture2D(GPUC1_Out, pj_yReference).xyzw);
+    float pj_x = interpretBytesVector(texture2D(xStarAndVelocity, pj_xReference).xyzw);
+    float pj_y = interpretBytesVector(texture2D(xStarAndVelocity, pj_yReference).xyzw);
     vec2 p_j = vec2(pj_x, pj_y);
 
-    float vi_x = interpretBytesVector(texture2D(GPUC1_Out, vi_xReference).xyzw);
-    float vi_y = interpretBytesVector(texture2D(GPUC1_Out, vi_yReference).xyzw);
+    float vi_x = interpretBytesVector(texture2D(xStarAndVelocity, vi_xReference).xyzw);
+    float vi_y = interpretBytesVector(texture2D(xStarAndVelocity, vi_yReference).xyzw);
     vec2 v_i = vec2(vi_x, vi_y);
 
-    float vj_x = interpretBytesVector(texture2D(GPUC1_Out, vj_xReference).xyzw);
-    float vj_y = interpretBytesVector(texture2D(GPUC1_Out, vj_yReference).xyzw);
+    float vj_x = interpretBytesVector(texture2D(xStarAndVelocity, vj_xReference).xyzw);
+    float vj_y = interpretBytesVector(texture2D(xStarAndVelocity, vj_yReference).xyzw);
     vec2 v_j = vec2(vj_x, vj_y);
 
     float r = length(p_i - p_j);

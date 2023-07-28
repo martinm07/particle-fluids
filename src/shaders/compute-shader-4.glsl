@@ -8,8 +8,8 @@
 flat varying float pRefN_startIndex;
 flat varying float pRefN_Length;
 flat varying float numExtras;
-uniform vec2 nRefResolution;
-uniform vec2 nResolution;
+uniform vec2 nRefRes;
+uniform vec2 c3Resolution;
 uniform float N;
 
 uniform float h;
@@ -60,17 +60,17 @@ void main() {
         float sum_dCi2 = 0.0;
         vec2 dpi_Ci = vec2(0.0, 0.0);
         for (float j = 0.0; j < pRefN_Length; j++) {
-            vec2 refCoord = getCoord(pRefN_startIndex + j, nRefResolution);
+            vec2 refCoord = getCoord(pRefN_startIndex + j, nRefRes);
             vec2 coord = texture2D(pRefN, refCoord).xy;
-            vec2 indexCoord = coord * nResolution - 0.5;
-            float index = indexCoord.x + indexCoord.y * nResolution.x;
+            vec2 indexCoord = coord * c3Resolution - 0.5;
+            float index = indexCoord.x + indexCoord.y * c3Resolution.x;
 
             float W_ij = interpretBytesVector(texture2D(GPUC3_Out, coord).xyzw);
 
-            vec2 dWx_coord = getCoord(index + (N / 4.0), nResolution);
+            vec2 dWx_coord = getCoord(index + (N / 4.0), c3Resolution);
             float dWi_x = interpretBytesVector(texture2D(GPUC3_Out, dWx_coord).xyzw);
 
-            vec2 dWy_coord = getCoord(index + 2.0 * N / 4.0, nResolution);
+            vec2 dWy_coord = getCoord(index + 2.0 * N / 4.0, c3Resolution);
             float dWi_y = interpretBytesVector(texture2D(GPUC3_Out, dWy_coord).xyzw);
 
             C_i += W_ij;
@@ -99,13 +99,13 @@ void main() {
         float APqW = (315.0 / (64.0 * PI * pow(h, 9.0))) * pow(pow(h, 2.0) - pow(APdeltaQ, 2.0), 3.0);
         float s_corr = 0.0;
         for (float j = 0.0; j < pRefN_Length; j++) {
-            vec2 refCoord = getCoord(pRefN_startIndex + j, nRefResolution);
+            vec2 refCoord = getCoord(pRefN_startIndex + j, nRefRes);
             vec2 coord = texture2D(pRefN, refCoord).xy;
             float W_ij = interpretBytesVector(texture2D(GPUC3_Out, coord).xyzw);
 
-            vec2 indexCoord = coord * nResolution - 0.5;
-            float index = indexCoord.x + indexCoord.y * nResolution.x;
-            vec2 dWx_coord = getCoord(index + (N / 4.0), nResolution);
+            vec2 indexCoord = coord * c3Resolution - 0.5;
+            float index = indexCoord.x + indexCoord.y * c3Resolution.x;
+            vec2 dWx_coord = getCoord(index + (N / 4.0), c3Resolution);
             float dWi_x = interpretBytesVector(texture2D(GPUC3_Out, dWx_coord).xyzw);
 
             s_corr += -1.0 * APk * pow(W_ij / APqW, APn) * dWi_x;
@@ -116,13 +116,13 @@ void main() {
         float APqW = (315.0 / (64.0 * PI * pow(h, 9.0))) * pow(pow(h, 2.0) - pow(APdeltaQ, 2.0), 3.0);
         float s_corr = 0.0;
         for (float j = 0.0; j < pRefN_Length; j++) {
-            vec2 refCoord = getCoord(pRefN_startIndex + j, nRefResolution);
+            vec2 refCoord = getCoord(pRefN_startIndex + j, nRefRes);
             vec2 coord = texture2D(pRefN, refCoord).xy;
             float W_ij = interpretBytesVector(texture2D(GPUC3_Out, coord).xyzw);
 
-            vec2 indexCoord = coord * nResolution - 0.5;
-            float index = indexCoord.x + indexCoord.y * nResolution.x;
-            vec2 dWy_coord = getCoord(index + 2.0 * N / 4.0, nResolution);
+            vec2 indexCoord = coord * c3Resolution - 0.5;
+            float index = indexCoord.x + indexCoord.y * c3Resolution.x;
+            vec2 dWy_coord = getCoord(index + 2.0 * N / 4.0, c3Resolution);
             float dWi_y = interpretBytesVector(texture2D(GPUC3_Out, dWy_coord).xyzw);
 
             s_corr += -1.0 * APk * pow(W_ij / APqW, APn) * dWi_y;
