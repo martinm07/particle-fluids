@@ -17,6 +17,7 @@ import computeShader1Code from "./shaders/compute-shader-1.glsl";
 import computeShader3Code from "./shaders/compute-shader-3.glsl";
 import computeShader4Code from "./shaders/compute-shader-4.glsl";
 import computeShader5Code from "./shaders/compute-shader-5.glsl";
+import computeShader6Code from "./shaders/compute-shader-6.glsl";
 
 const NUL = -1111111;
 const MAX_NEIGHBOURS = 64;
@@ -308,8 +309,8 @@ function initPositions(): THREE.DataTexture {
 }
 
 const gpuComputes: GPUCompute[] = Array(7);
-let positions: THREE.DataTexture;
-let velocities: THREE.DataTexture;
+let positions: THREE.Texture;
+let velocities: THREE.Texture;
 
 // order: x1, y1, x2, y2
 const lineBounds = [
@@ -330,28 +331,23 @@ function initGPUComputes() {
   ]);
 
   // x/y components combined, and for every p_ij there's a redundant p_ji, thus `... / 2 / 2`, or `... / 4`
-  gpuComputes[3] = new GPUCompute((N / 4) * 5, computeShader3Code, renderer, [
+  gpuComputes[3] = new GPUCompute((N / 4) * 3, computeShader3Code, renderer, [
     { name: "p_i", itemSize: 2 },
     { name: "p_j", itemSize: 2 },
-    { name: "GPUC3_Mask", texture: initMask(N / 4, 5) },
+    { name: "GPUC3_Mask", texture: initMask(N / 4, 3) },
     { name: "xStarAndVelocity" },
     { name: "pi_xReference", itemSize: 2 },
     { name: "pi_yReference", itemSize: 2 },
     { name: "pj_xReference", itemSize: 2 },
     { name: "pj_yReference", itemSize: 2 },
-    { name: "vi_xReference", itemSize: 2 },
-    { name: "vi_yReference", itemSize: 2 },
-    { name: "vj_xReference", itemSize: 2 },
-    { name: "vj_yReference", itemSize: 2 },
   ]);
   gpuComputes[3].updateUniform("h", KERNEL_WIDTH);
   gpuComputes[3].updateUniform("NUL", NUL);
 
-  // prettier-ignore
   // x/y components combined, thus `... / 2`
   gpuComputes[4] = new GPUCompute((P / 2) * 3, computeShader4Code, renderer, [
     { name: "GPUC4_Mask", texture: initMask(P / 2, 3) },
-    { name: "GPUC3_Out", texture: initTexture((N / 4) * 5) },
+    { name: "GPUC3_Out", texture: initTexture((N / 4) * 3) },
     { name: "pRefN_startIndex", itemSize: 1 },
     { name: "pRefN_Length", itemSize: 1 },
     { name: "numExtras", itemSize: 1 },
@@ -367,14 +363,14 @@ function initGPUComputes() {
     ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE
   );
   gpuComputes[4].updateUniform("APn", ARTIFICIAL_PRESSURE_POWER);
-  gpuComputes[4].updateUniform("N", N);
 
   gpuComputes[5] = new GPUCompute(P * 2, computeShader5Code, renderer, [
     { name: "GPUC5_Mask", texture: initMask(P, 2) },
-    { name: "GPUC3_Out" },
-    { name: "GPUC4_Out" },
+    { name: "GPUC3_Out", texture: initTexture((N / 4) * 3) },
+    { name: "GPUC4_Out", texture: initTexture((P / 2) * 3) },
     { name: "pRefN_startIndex", itemSize: 1 },
     { name: "pRefN_Length", itemSize: 1 },
+    { name: "numExtras", itemSize: 1 },
     { name: "pRefN", texture: pRefN },
     { name: "pRefPN", texture: pRefPN },
     { name: "lambdaRef", itemSize: 2 },
@@ -386,9 +382,21 @@ function initGPUComputes() {
   gpuComputes[5].updateUniform("NUL", NUL);
   gpuComputes[5].updateUniform("lineBounds", lineBounds);
   gpuComputes[5].updateUniform("restDensity", REST_DENSITY);
-  gpuComputes[5].updateUniform("N", N);
 
-  // Provide all texture resolutions for all shaders
+  gpuComputes[6] = new GPUCompute(P, computeShader6Code, renderer, [
+    { name: "xStarAndVelocity" },
+    { name: "X" },
+    { name: "GPUC3_Out", texture: initTexture((N / 4) * 5) },
+    { name: "pRefN_startIndex", itemSize: 1 },
+    { name: "pRefN_Length", itemSize: 1 },
+    { name: "numExtras", itemSize: 1 },
+    { name: "pRefPN", texture: pRefPN },
+  ]);
+  gpuComputes[6].updateUniform("h", KERNEL_WIDTH);
+  gpuComputes[6].updateUniform("vorticityCoefficient", VORTICITY_COEFFICIENT);
+  gpuComputes[6].updateUniform("viscosityCoefficient", VISCOSITY_COEFFICIENT);
+
+  // Provide some constant uniforms for all shaders
   const computeIDs = gpuComputes.map((_el, i) => i).flat();
   for (const i of computeIDs) {
     for (const c of computeIDs) {
@@ -402,6 +410,8 @@ function initGPUComputes() {
     gpuComputes[i].updateUniform("pRes", new Float32Array([posTexWidth, posTexHeight]));
     // prettier-ignore
     gpuComputes[i].updateUniform("nRefRes", new Float32Array([pRefNsizeX, pRefNsizeY]));
+    gpuComputes[i].updateUniform("P", P);
+    gpuComputes[i].updateUniform("N", N);
   }
 }
 
@@ -414,6 +424,8 @@ const CONSTRAINT_RELAXATION = 2.2;
 const ARTIFICIAL_PRESSURE_SCALE = 0.045;
 const ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE = 0.07 * KERNEL_WIDTH;
 const ARTIFICIAL_PRESSURE_POWER = 4;
+const VORTICITY_COEFFICIENT = 0.3;
+const VISCOSITY_COEFFICIENT = 0.1;
 
 type GridMap = Map<string, number[]>;
 let gridMap: GridMap;
@@ -487,8 +499,8 @@ function render() {
   const allNeighbours: number[][] = Array(xStar.length / 2);
 
   const gpuc3References: { [key: string]: Float32Array } = {};
-  ["pi_x", "pi_y", "pj_x", "pj_y", "vi_x", "vi_y", "vj_x", "vj_y"].forEach(
-    (name) => (gpuc3References[name] = new Float32Array((N / 2) * 5).fill(NUL))
+  ["pi_x", "pi_y", "pj_x", "pj_y"].forEach(
+    (name) => (gpuc3References[name] = new Float32Array((N / 2) * 3).fill(NUL))
   );
 
   // The idea is to provide a start index and length (i.e. number of neighbours)
@@ -515,22 +527,18 @@ function render() {
     }
 
     // prettier-ignore
-    const texCoordsConstructor = (gpuCompute: GPUCompute, i: number, yOffset = 0.) => [
+    const texCoordsConstructor = (gpuCompute: GPUCompute, i: number) => [
       ((i % gpuCompute.sizeX) + 0.5) / gpuCompute.sizeX,
-      (Math.trunc(i / gpuCompute.sizeX) + 0.5) / gpuCompute.sizeY + yOffset,
+      (Math.trunc(i / gpuCompute.sizeX) + 0.5) / gpuCompute.sizeY,
     ];
 
     const texCoords = texCoordsConstructor.bind(null, gpuComputes[1]);
     // prettier-ignore
     {
-    gpuc3References.pi_x.set(Array(allNeighbours[i].length).fill(texCoords(i * 2, 0.5)).flat(), accumIndex);
-    gpuc3References.pi_y.set(Array(allNeighbours[i].length).fill(texCoords(i * 2 + 1, 0.5)).flat(), accumIndex);
-    gpuc3References.pj_x.set(allNeighbours[i].flatMap((id_) => texCoords(id_ * 2, 0.5)), accumIndex);
-    gpuc3References.pj_y.set(allNeighbours[i].flatMap((id_) => texCoords(id_ * 2 + 1, 0.5)), accumIndex);
-    gpuc3References.vi_x.set(Array(allNeighbours[i].length).fill(texCoords(i * 2)).flat(), accumIndex);
-    gpuc3References.vi_y.set(Array(allNeighbours[i].length).fill(texCoords(i * 2 + 1)).flat(), accumIndex);
-    gpuc3References.vj_x.set(allNeighbours[i].flatMap((id_) => texCoords(id_ * 2)), accumIndex);
-    gpuc3References.vj_y.set(allNeighbours[i].flatMap((id_) => texCoords(id_ * 2 + 1)), accumIndex);
+    gpuc3References.pi_x.set(Array(allNeighbours[i].length).fill(texCoords(i * 2 + P)).flat(), accumIndex);
+    gpuc3References.pi_y.set(Array(allNeighbours[i].length).fill(texCoords(i * 2 + 1 + P)).flat(), accumIndex);
+    gpuc3References.pj_x.set(allNeighbours[i].flatMap((id_) => texCoords(id_ * 2 + P)), accumIndex);
+    gpuc3References.pj_y.set(allNeighbours[i].flatMap((id_) => texCoords(id_ * 2 + 1 + P)), accumIndex);
     }
 
     const texNCoords = texCoordsConstructor.bind(null, gpuComputes[3]);
@@ -584,7 +592,7 @@ function render() {
   }
   // Copy the varying values into each part of the mask
   // GPUC3
-  for (let k = 1; k < 5; k++) {
+  for (let k = 1; k < 3; k++) {
     Object.entries(gpuc3References).forEach(([_name, data]) =>
       data.set(data.slice(0, N / 2), k * (N / 2))
     );
@@ -604,10 +612,14 @@ function render() {
   gpuComputes[4].varInputs.pRefN_Length = pRefN_Length;
   gpuComputes[4].varInputs.numExtras = numExtras;
 
-  const toC5Range = (arr: Float32Array) =>
+  const duplicateXY = (arr: Float32Array) =>
     arr.slice(0, P).map((_, i) => arr[Math.trunc(i / 2)]);
-  gpuComputes[5].varInputs.pRefN_startIndex = toC5Range(pRefN_startIndex);
-  gpuComputes[5].varInputs.pRefN_Length = toC5Range(pRefN_Length);
+  // const repeat = (arr: Float32Array, n: number) =>
+  //   new Float32Array(arr.length * n).map((_, i) => arr[i % arr.length]);
+
+  gpuComputes[5].varInputs.pRefN_startIndex = duplicateXY(pRefN_startIndex);
+  gpuComputes[5].varInputs.pRefN_Length = duplicateXY(pRefN_Length);
+  gpuComputes[5].varInputs.numExtras = duplicateXY(numExtras);
   gpuComputes[5].varInputs.lambdaRef = lambdaRef;
   gpuComputes[5].varInputs.sCorr_xRef = sCorr_xRef;
   gpuComputes[5].varInputs.sCorr_yRef = sCorr_yRef;
@@ -631,6 +643,16 @@ function render() {
     //  https://github.com/mrdoob/three.js/issues/20328#issuecomment-1069257169
     xStarAndVelocity.isRenderTargetTexture = true;
   }
+
+  gpuComputes[6].varInputs.pRefN_startIndex = duplicateXY(pRefN_startIndex);
+  gpuComputes[6].varInputs.pRefN_Length = duplicateXY(pRefN_Length);
+  gpuComputes[6].varInputs.numExtras = duplicateXY(numExtras);
+  gpuComputes[6].texInputs.xStarAndVelocity = xStarAndVelocity;
+  gpuComputes[6].texInputs.X = positions;
+
+  gpuComputes[6].compute();
+  velocities = gpuComputes[6].renderTarget.texture.clone();
+  velocities.isRenderTargetTexture = true;
 
   particleUniforms["texturePosition"].value = positions;
   if (first) {

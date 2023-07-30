@@ -5,12 +5,14 @@ flat varying vec2 sCorr_xRef;
 flat varying vec2 sCorr_yRef;
 flat varying float pRefN_startIndex;
 flat varying float pRefN_Length;
+flat varying float numExtras;
 uniform vec2 nRefRes;
 uniform vec2 c1Resolution;
 uniform vec2 c3Resolution;
 uniform vec2 c4Resolution;
-uniform float N;
 uniform vec2 pRes;
+uniform float N;
+uniform float P;
 
 uniform sampler2D xStarAndVelocity;
 uniform sampler2D X;
@@ -67,6 +69,7 @@ void main() {
 
             float c4Index = texture2D(pRefPN, refCoord).x;
             vec2 lambdajCoord = getCoord(c4Index, c4Resolution);
+            // This doesn't need adjustment for being an "extra," as that's already done.
             float lambda_j = interpretBytesVector(texture2D(GPUC4_Out, lambdajCoord).xyzw);
 
             vec2 dWx_coord = getCoord(index + (N / 4.0), c3Resolution);
@@ -74,6 +77,10 @@ void main() {
             vec2 dWy_coord = getCoord(index + 2.0 * (N / 4.0), c3Resolution);
             float dWy = interpretBytesVector(texture2D(GPUC3_Out, dWy_coord).xyzw);
             vec2 dW = vec2(dWx, dWy);
+
+            if (pRefN_Length - j <= numExtras) {
+                dW *= -1.0;
+            }
 
             deltaP += (lambda_i + lambda_j) * dW;
         }
@@ -84,10 +91,10 @@ void main() {
 
         // IMP: In difference to the original algorithm, we adjust xStar by deltaP *before* collision response.
         ///     It may be worth it to look at both behaviours.
-        vec2 xStar_xCoord = getCoord(2.0 * floor(computeIndex / 2.0), c1Resolution);
+        vec2 xStar_xCoord = getCoord(2.0 * floor(computeIndex / 2.0) + P, c1Resolution);
         float xStar_x = interpretBytesVector(texture2D(xStarAndVelocity, xStar_xCoord));
 
-        vec2 xStar_yCoord = getCoord(2.0 * floor(computeIndex / 2.0) + 1.0, c1Resolution);
+        vec2 xStar_yCoord = getCoord(2.0 * floor(computeIndex / 2.0) + 1.0 + P, c1Resolution);
         float xStar_y = interpretBytesVector(texture2D(xStarAndVelocity, xStar_yCoord));
 
         vec2 newXStar = vec2(xStar_x + xStar_y) + deltaP;

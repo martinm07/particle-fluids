@@ -5,10 +5,6 @@ flat varying vec2 pi_xReference;
 flat varying vec2 pi_yReference;
 flat varying vec2 pj_xReference;
 flat varying vec2 pj_yReference;
-flat varying vec2 vi_xReference;
-flat varying vec2 vi_yReference;
-flat varying vec2 vj_xReference;
-flat varying vec2 vj_yReference;
 uniform float h;
 uniform float NUL;
 
@@ -51,14 +47,6 @@ void main() {
     float pj_y = interpretBytesVector(texture2D(xStarAndVelocity, pj_yReference).xyzw);
     vec2 p_j = vec2(pj_x, pj_y);
 
-    float vi_x = interpretBytesVector(texture2D(xStarAndVelocity, vi_xReference).xyzw);
-    float vi_y = interpretBytesVector(texture2D(xStarAndVelocity, vi_yReference).xyzw);
-    vec2 v_i = vec2(vi_x, vi_y);
-
-    float vj_x = interpretBytesVector(texture2D(xStarAndVelocity, vj_xReference).xyzw);
-    float vj_y = interpretBytesVector(texture2D(xStarAndVelocity, vj_yReference).xyzw);
-    vec2 v_j = vec2(vj_x, vj_y);
-
     float r = length(p_i - p_j);
     if (mask == 1.0) {
         // W(pᵢ - pⱼ)
@@ -82,21 +70,6 @@ void main() {
             gl_FragColor = interpretFloat(dr_dpi * dW_dr);
         } else {
             gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
-        }
-    } else if (mask == 4.0 || mask == 5.0) {
-        // ∇ωᵢⱼ
-        float d2W_dr2 = (90.0 / (PI * pow(h, 6.0))) * (h - r);
-        float dr_dpi_squared;
-        if (mask == 4.0) {
-            dr_dpi_squared = pow((p_i.x - p_j.x) / (r + EPSILON), 2.0);
-        } else if (mask == 5.0) {
-            dr_dpi_squared = pow((p_i.y - p_j.y) / (r + EPSILON), 2.0);
-        }
-        float dpi_dpj_W = -1.0 * d2W_dr2 * dr_dpi_squared;
-        if (mask == 4.0) {
-            gl_FragColor = interpretFloat(-1.0 * (v_j.y - v_i.y) * dpi_dpj_W);
-        } else if (mask == 5.0) {
-            gl_FragColor = interpretFloat((v_j.x - v_i.x) * dpi_dpj_W);
         }
     }
 }
