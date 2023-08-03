@@ -1,4 +1,5 @@
-uniform sampler2D forcesTexture;
+// uniform sampler2D forcesTexture;
+flat varying float force;
 uniform sampler2D positionsTexture;
 uniform sampler2D velocitiesTexture;
 flat varying vec2 pReference;
@@ -30,7 +31,6 @@ void main() {
     vec2 uv = gl_FragCoord.xy / resolution.xy;
 
     float position = interpretBytesVector(texture2D(positionsTexture, pReference).xyzw);
-    float force = interpretBytesVector(texture2D(forcesTexture, pReference).xyzw);
     float velocity = interpretBytesVector(texture2D(velocitiesTexture, pReference).xyzw);
 
     float mask = texture2D(GPUC1_Mask, uv).x * 255.0;

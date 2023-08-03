@@ -316,7 +316,7 @@ export class GPUCompute {
 
     this.scene.add(this.mesh);
   }
-  compute() {
+  compute(copyTexture = false) {
     const currentRenderTarget = this.renderer.getRenderTarget();
 
     const currentXrEnabled = this.renderer.xr.enabled;
@@ -332,12 +332,24 @@ export class GPUCompute {
     this.renderer.setRenderTarget(this.renderTarget);
     this.renderer.render(this.scene, this.camera);
 
+    let texture;
+    if (copyTexture) {
+      texture = new THREE.FramebufferTexture(
+        this.sizeX,
+        this.sizeY,
+        THREE.RGBAFormat
+      );
+      const vector = new THREE.Vector2(0, 0);
+      this.renderer.copyFramebufferToTexture(vector, texture);
+    }
+
     this.renderer.xr.enabled = currentXrEnabled;
     this.renderer.shadowMap.autoUpdate = currentShadowAutoUpdate;
     this.renderer.outputColorSpace = currentOutputColorSpace;
     this.renderer.toneMapping = currentToneMapping;
 
     this.renderer.setRenderTarget(currentRenderTarget);
+    if (copyTexture) return texture;
   }
   updateUniform(name: string, value: any) {
     this.mesh.material.uniforms[name] ??= { value };

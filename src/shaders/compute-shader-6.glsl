@@ -1,4 +1,5 @@
 #define PI 3.1415926538
+#define EPSILON 0.0001
 
 uniform sampler2D xStarAndVelocity;
 uniform sampler2D X;
@@ -16,6 +17,8 @@ uniform float deltaT;
 uniform float h;
 uniform float vorticityCoefficient;
 uniform float viscosityCoefficient;
+
+uniform bool debug;
 
 float interpretBytesVector(vec4 bytes) {
     bytes *= 255.0;
@@ -106,7 +109,7 @@ void main() {
         viscosity += v_ij * W;
     }
 
-    vec2 dVorticityNormal = dVorticity / length(dVorticity);
+    vec2 dVorticityNormal = dVorticity / (length(dVorticity) + EPSILON);
     vec2 f_vorticity = vorticityCoefficient * (dVorticityNormal * vorticity);
 
     vec2 f_viscosity = viscosityCoefficient * viscosity;
@@ -114,11 +117,21 @@ void main() {
     float prevX = interpretBytesVector(texture2D(X, gl_FragCoord.xy / resolution.xy).xyzw);
     if (mod(computeIndex, 2.0) == 0.0) {
         float finalVelocity = (1.0 / deltaT) * (p_i.x - prevX);
-        finalVelocity += (deltaT * f_vorticity.x) + (f_viscosity.x);
+        // finalVelocity += (deltaT * f_vorticity.x) + (f_viscosity.x);
+        finalVelocity += f_viscosity.x;
         gl_FragColor = interpretFloat(finalVelocity);
     } else {
         float finalVelocity = (1.0 / deltaT) * (p_i.y - prevX);
-        finalVelocity += (deltaT * f_vorticity.y) + (f_viscosity.y);
+        // finalVelocity += (deltaT * f_vorticity.y) + (f_viscosity.y);
+        finalVelocity += f_viscosity.y;
         gl_FragColor = interpretFloat(finalVelocity);
+    }
+
+    if (debug) {
+        if (mod(computeIndex, 2.0) == 0.0) {
+            gl_FragColor = interpretFloat(pRefN_startIndex);
+        } else {
+            gl_FragColor = interpretFloat(pRefN_Length);
+        }
     }
 }

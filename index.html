@@ -7,6 +7,48 @@
     <title>ThreeJS Demo</title>
   </head>
   <body>
+    <button id="next-frame">Next Frame</button>
+    <button id="start-stop">Start/Stop Simulation</button>
+    <button id="reset">Reset</button>
+    <button id="debug">🔧</button>
+    <ul class="param-sliders">
+      <li id="GRAVITY">
+        Gravity:
+        <input type="range" step="any" min="-1" max="250" />(<span></span>)
+      </li>
+      <li id="KERNEL_WIDTH">
+        Smoothing Kernel Radius:
+        <input type="range" step="any" min="0" max="5" />(<span></span>)
+      </li>
+      <li id="REST_DENSITY">
+        Rest Density:
+        <input type="range" step="any" min="0.01" max="5" />(<span></span>)
+      </li>
+      <li id="ARTIFICIAL_PRESSURE_SCALE">
+        Artificial Pressure Coefficient (k):
+        <input type="range" step="any" min="0" max="1" />(<span></span>)
+      </li>
+      <li id="ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE">
+        Artificial Pressure Particle Distance (Δq):
+        <input type="range" step="any" min="0" max="1" />(<span></span>)
+      </li>
+      <li id="ARTIFICIAL_PRESSURE_POWER">
+        Articial Pressure Power (n):
+        <input type="range" step="1" min="0" max="8" />(<span></span>)
+      </li>
+      <li id="VISCOSITY_COEFFICIENT">
+        Viscosity Coefficient:
+        <input type="range" step="any" min="0" max="2" />(<span></span>)
+      </li>
+      <li id="CONSTRAINT_RELAXATION">
+        Constraint Relaxation:
+        <input type="range" step="any" min="0" max="10" />(<span></span>)
+      </li>
+      <li id="VORTICITY_COEFFICIENT">
+        Vorticity Coefficient:
+        <input type="range" step="any" min="0" max="1" />(<span></span>)
+      </li>
+    </ul>
     <div id="scene-container"></div>
     <script type="module" src="/src/script.ts"></script>
   </body>

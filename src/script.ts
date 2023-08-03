@@ -18,9 +18,11 @@ import computeShader3Code from "./shaders/compute-shader-3.glsl";
 import computeShader4Code from "./shaders/compute-shader-4.glsl";
 import computeShader5Code from "./shaders/compute-shader-5.glsl";
 import computeShader6Code from "./shaders/compute-shader-6.glsl";
+import assignPositionsCode from "./shaders/assign-positions.glsl";
 
 const NUL = -1111111;
 const MAX_NEIGHBOURS = 64;
+// There is an issue with non-power-of-2 values here- quite mysterious
 const N_PARTICLES = 16 ** 2;
 const P = 2 * N_PARTICLES;
 const N = 2 * N_PARTICLES * MAX_NEIGHBOURS;
@@ -137,7 +139,7 @@ function init() {
   container.appendChild(renderer.domElement);
 
   positions = initPositions();
-  console.log(positions);
+  velocities = initTexture(P);
 
   initGPUComputes();
 
@@ -155,13 +157,12 @@ function init() {
 
   initParticleRenders();
 
-  // Marker of coord (-75, -75) for testing purposes
   const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
   const linePoints = [];
-  linePoints.push(new THREE.Vector3(-85, -75, 0));
-  linePoints.push(new THREE.Vector3(-65, -75, 0));
-  linePoints.push(new THREE.Vector3(-75, -85, 0));
-  linePoints.push(new THREE.Vector3(-75, -65, 0));
+  linePoints.push(new THREE.Vector3(-20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
+  linePoints.push(new THREE.Vector3(-20 * PIXEL_SCALE, -20 * PIXEL_SCALE, 0));
+  linePoints.push(new THREE.Vector3(20 * PIXEL_SCALE, -20 * PIXEL_SCALE, 0));
+  linePoints.push(new THREE.Vector3(20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
   const linesGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
   const line = new THREE.Line(linesGeometry, lineMaterial);
   scene.add(line);
@@ -294,6 +295,7 @@ function initPositions(): THREE.DataTexture {
   const texture = initTexture(P);
   texture.needsUpdate = true;
   const theArray = texture.image.data;
+  const test = [];
   for (let i = 0, il = theArray.length; i < il / 4; i++) {
     let num: number;
     if (i % 2 === 0) {
@@ -303,32 +305,35 @@ function initPositions(): THREE.DataTexture {
       // y coordinate
       num = Math.floor(i / 30) * 1;
     }
+    test.push(num);
     theArray.set(floatToBytesArray(num), i * 4);
   }
+  console.log(test);
   return texture;
 }
 
-const gpuComputes: GPUCompute[] = Array(7);
+const gpuComputes: GPUCompute[] = Array(8);
 let positions: THREE.Texture;
 let velocities: THREE.Texture;
 
 // order: x1, y1, x2, y2
 const lineBounds = [
-  [-10, -10, 10, -10],
-  [-10, -10, -10, 100],
-  [10, -10, 10, 100],
+  [-20, -20, 20, -20],
+  [-20, -20, -20, 200],
+  [20, -20, 20, 200],
 ].flat();
 lineBounds.push(NUL);
 
 function initGPUComputes() {
   // prettier-ignore
   gpuComputes[1] = new GPUCompute(P * 2, computeShader1Code, renderer, [
-    { name: "forcesTexture", texture: initTexture(P) },
+    { name: "force", itemSize: 1 },
     { name: "positionsTexture", texture: positions },
     { name: "velocitiesTexture", texture: velocities },
     { name: "pReference", itemSize: 2, data: createTextureReference(P * 2, P) },
     { name: "GPUC1_Mask", texture: initMask(P, 2) },
   ]);
+  console.log(gpuComputes[1]);
 
   // x/y components combined, and for every p_ij there's a redundant p_ji, thus `... / 2 / 2`, or `... / 4`
   gpuComputes[3] = new GPUCompute((N / 4) * 3, computeShader3Code, renderer, [
@@ -382,6 +387,7 @@ function initGPUComputes() {
   gpuComputes[5].updateUniform("NUL", NUL);
   gpuComputes[5].updateUniform("lineBounds", lineBounds);
   gpuComputes[5].updateUniform("restDensity", REST_DENSITY);
+  gpuComputes[5].updateUniform("debug", false);
 
   gpuComputes[6] = new GPUCompute(P, computeShader6Code, renderer, [
     { name: "xStarAndVelocity" },
@@ -395,6 +401,11 @@ function initGPUComputes() {
   gpuComputes[6].updateUniform("h", KERNEL_WIDTH);
   gpuComputes[6].updateUniform("vorticityCoefficient", VORTICITY_COEFFICIENT);
   gpuComputes[6].updateUniform("viscosityCoefficient", VISCOSITY_COEFFICIENT);
+  gpuComputes[6].updateUniform("debug", false);
+
+  gpuComputes[7] = new GPUCompute(P, assignPositionsCode, renderer, [
+    { name: "xStarAndVelocity" },
+  ]);
 
   // Provide some constant uniforms for all shaders
   const computeIDs = gpuComputes.map((_el, i) => i).flat();
@@ -415,17 +426,18 @@ function initGPUComputes() {
   }
 }
 
-const PIXEL_SCALE = 4;
-const GRIDSIZE = 1;
-const SOLVER_ITERATIONS = 3;
-const KERNEL_WIDTH = 2;
-const REST_DENSITY = 0.85;
-const CONSTRAINT_RELAXATION = 2.2;
-const ARTIFICIAL_PRESSURE_SCALE = 0.045;
-const ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE = 0.07 * KERNEL_WIDTH;
-const ARTIFICIAL_PRESSURE_POWER = 4;
-const VORTICITY_COEFFICIENT = 0.3;
-const VISCOSITY_COEFFICIENT = 0.1;
+let PIXEL_SCALE = 4;
+let GRIDSIZE = 1;
+let SOLVER_ITERATIONS = 10;
+let KERNEL_WIDTH = 1.32;
+let GRAVITY = 100;
+let REST_DENSITY = 0.85;
+let CONSTRAINT_RELAXATION = 2.2;
+let ARTIFICIAL_PRESSURE_SCALE = 0.045;
+let ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE = 0.07 * KERNEL_WIDTH;
+let ARTIFICIAL_PRESSURE_POWER = 4;
+let VORTICITY_COEFFICIENT = 0.3;
+let VISCOSITY_COEFFICIENT = 0.1;
 
 type GridMap = Map<string, number[]>;
 let gridMap: GridMap;
@@ -480,15 +492,24 @@ const pRefPN = new THREE.DataTexture(
   THREE.FloatType
 );
 
+let debug = false;
+let paused = true;
 let last = performance.now();
 let first = true;
 function render() {
   const now = performance.now();
-  let delta = (now - last) / 1000;
+  let delta = paused ? 0.0166 : (now - last) / 1000;
   if (delta > 1) delta = 1; // Cut off for large delta values (experiment with number in future)
   last = now;
 
   gpuComputes.forEach((gpuc) => gpuc.updateUniform("deltaT", delta));
+
+  gpuComputes[1].varInputs.force = new Float32Array(
+    Array(P).fill([0, -GRAVITY]).flat()
+  );
+  if (first) console.log(velocities);
+  gpuComputes[1].texInputs.velocitiesTexture = velocities;
+  gpuComputes[1].texInputs.positionsTexture = positions;
 
   gpuComputes[1].compute();
   // prettier-ignore
@@ -612,18 +633,24 @@ function render() {
   gpuComputes[4].varInputs.pRefN_Length = pRefN_Length;
   gpuComputes[4].varInputs.numExtras = numExtras;
 
-  const duplicateXY = (arr: Float32Array) =>
-    arr.slice(0, P).map((_, i) => arr[Math.trunc(i / 2)]);
-  // const repeat = (arr: Float32Array, n: number) =>
-  //   new Float32Array(arr.length * n).map((_, i) => arr[i % arr.length]);
+  // Duplicates every element once for the X and Y components of the texture
+  //  and pads the start with 0s where velocities will make a pass-through.
+  const prepareC5 = (arr: Float32Array) =>
+    new Float32Array(P * 2).map((_, i) =>
+      i >= P ? arr[Math.trunc((i - P) / 2)] : 0
+    );
+  // Pads the start with 0s
+  const prepareC5Refs = (arr: Float32Array) =>
+    new Float32Array(P * 4).map((_, i) => (i >= P * 2 ? arr[i - P * 2] : 0));
 
-  gpuComputes[5].varInputs.pRefN_startIndex = duplicateXY(pRefN_startIndex);
-  gpuComputes[5].varInputs.pRefN_Length = duplicateXY(pRefN_Length);
-  gpuComputes[5].varInputs.numExtras = duplicateXY(numExtras);
-  gpuComputes[5].varInputs.lambdaRef = lambdaRef;
-  gpuComputes[5].varInputs.sCorr_xRef = sCorr_xRef;
-  gpuComputes[5].varInputs.sCorr_yRef = sCorr_yRef;
+  gpuComputes[5].varInputs.pRefN_startIndex = prepareC5(pRefN_startIndex);
+  gpuComputes[5].varInputs.pRefN_Length = prepareC5(pRefN_Length);
+  gpuComputes[5].varInputs.numExtras = prepareC5(numExtras);
+  gpuComputes[5].varInputs.lambdaRef = prepareC5Refs(lambdaRef);
+  gpuComputes[5].varInputs.sCorr_xRef = prepareC5Refs(sCorr_xRef);
+  gpuComputes[5].varInputs.sCorr_yRef = prepareC5Refs(sCorr_yRef);
   gpuComputes[5].texInputs.X = positions;
+  gpuComputes[5].updateUniform("debug", debug);
 
   let xStarAndVelocity = gpuComputes[1].renderTarget.texture;
   for (let _ = 0; _ < SOLVER_ITERATIONS; _++) {
@@ -636,30 +663,30 @@ function render() {
     gpuComputes[5].texInputs.GPUC3_Out = gpuComputes[3].renderTarget.texture;
     gpuComputes[5].texInputs.GPUC4_Out = gpuComputes[4].renderTarget.texture;
     gpuComputes[5].texInputs.xStarAndVelocity = xStarAndVelocity;
-    gpuComputes[5].compute();
-
-    xStarAndVelocity = gpuComputes[5].renderTarget.texture.clone();
-    // Since we're cloning specifically the texture, we need to do this. See
-    //  https://github.com/mrdoob/three.js/issues/20328#issuecomment-1069257169
-    xStarAndVelocity.isRenderTargetTexture = true;
+    xStarAndVelocity = gpuComputes[5].compute(true)!;
   }
 
-  gpuComputes[6].varInputs.pRefN_startIndex = duplicateXY(pRefN_startIndex);
-  gpuComputes[6].varInputs.pRefN_Length = duplicateXY(pRefN_Length);
-  gpuComputes[6].varInputs.numExtras = duplicateXY(numExtras);
+  const prepareC6 = (arr: Float32Array) =>
+    arr.slice(0, P).map((_, i) => arr[Math.trunc(i / 2)]);
+  gpuComputes[6].varInputs.pRefN_startIndex = prepareC6(pRefN_startIndex);
+  gpuComputes[6].varInputs.pRefN_Length = prepareC6(pRefN_Length);
+  gpuComputes[6].varInputs.numExtras = prepareC6(numExtras);
   gpuComputes[6].texInputs.xStarAndVelocity = xStarAndVelocity;
   gpuComputes[6].texInputs.X = positions;
 
-  gpuComputes[6].compute();
-  velocities = gpuComputes[6].renderTarget.texture.clone();
-  velocities.isRenderTargetTexture = true;
+  if (!debug) gpuComputes[6].compute();
+  velocities = gpuComputes[6].renderTarget.texture;
+
+  gpuComputes[7].texInputs.xStarAndVelocity = xStarAndVelocity;
+  if (!debug) gpuComputes[7].compute();
+  positions = gpuComputes[7].renderTarget.texture;
 
   particleUniforms["texturePosition"].value = positions;
-  if (first) {
+  if (debug) {
     console.log("------------------------");
-    const gpuCompute = gpuComputes[3];
+    const gpuCompute = gpuComputes[5];
 
-    console.log(gpuCompute.sizeX, gpuCompute.sizeY);
+    // console.log(gpuCompute.sizeX, gpuCompute.sizeY);
     const pixelBuffer = new Uint8Array(gpuCompute.sizeX * gpuCompute.sizeY * 4);
     renderer.readRenderTargetPixels(
       gpuCompute.renderTarget,
@@ -674,14 +701,16 @@ function render() {
     const pixelBufferFloats = Array(...pixelBuffer).map((_el, i) =>
       i % 4 === 0 ? bytesToFloat(pixelBuffer.slice(i, i + 4)) : 0
     ).filter((_el, i) => i % 4 === 0);
-    console.log(pixelBufferFloats);
+    // console.log(pixelBufferFloats);
+    console.log(pixelBufferFloats.slice(512));
+    if (pixelBufferFloats.slice(512).every((el) => el === 0))
+      console.log(">>> All zero...");
   }
-
-  if (first) {
-    console.log("------------------------");
+  if (!debug && paused) {
+    // console.log("------------------------");
     const gpuCompute = gpuComputes[5];
 
-    console.log(gpuCompute.sizeX, gpuCompute.sizeY);
+    // console.log(gpuCompute.sizeX, gpuCompute.sizeY);
     const pixelBuffer = new Uint8Array(gpuCompute.sizeX * gpuCompute.sizeY * 4);
     renderer.readRenderTargetPixels(
       gpuCompute.renderTarget,
@@ -700,8 +729,73 @@ function render() {
   }
 
   renderer.render(scene, camera);
+  debug = false;
   if (first) first = false;
-  requestAnimationFrame(render);
+  if (!paused) requestAnimationFrame(render);
 }
 init();
 render();
+
+////////////////////// SIMULATION CONTROLS
+
+const nextFrameBtn = document.querySelector<HTMLButtonElement>("#next-frame")!;
+const startStopBtn = document.querySelector("#start-stop")!;
+const resetBtn = document.querySelector("#reset")!;
+const debugBtn = document.querySelector("#debug")!;
+nextFrameBtn.addEventListener("click", () => {
+  requestAnimationFrame(render);
+});
+debugBtn.addEventListener("click", () => {
+  debug = true;
+  requestAnimationFrame(render);
+});
+startStopBtn.addEventListener("click", () => {
+  paused = !paused;
+  nextFrameBtn.disabled = !paused;
+  if (!paused) {
+    last = performance.now() - 16;
+    requestAnimationFrame(render);
+  }
+});
+resetBtn.addEventListener("click", () => {
+  positions = initPositions();
+  particleUniforms["texturePosition"].value = positions;
+  velocities = initTexture(P);
+  renderer.render(scene, camera);
+});
+
+function makeParameterSlider(
+  paramName: string,
+  glslName: string,
+  depends: number[]
+) {
+  const input = document.querySelector(`#${paramName}`)!;
+  const inputEl = input.querySelector("input")!;
+  const inputValueDisplay = input.querySelector("span")!;
+  inputEl.value = `${eval(paramName)}`;
+  inputValueDisplay.textContent = inputEl.value;
+  inputEl.addEventListener("input", (event) => {
+    if (!(event.target instanceof HTMLInputElement)) return;
+    inputValueDisplay.textContent = event.target.value;
+    let value = Number.parseFloat(event.target.value);
+    eval(`${paramName} = value;`);
+    depends.forEach((depend) =>
+      gpuComputes[depend].updateUniform(glslName, value)
+    );
+  });
+}
+
+const params: [string, string, number[]][] = [
+  ["GRAVITY", "", []],
+  ["KERNEL_WIDTH", "h", [3, 4, 6]],
+  ["REST_DENSITY", "restDensity", [4, 5]],
+  ["ARTIFICIAL_PRESSURE_SCALE", "APk", [4]],
+  ["ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE", "APdeltaQ", [4]],
+  ["ARTIFICIAL_PRESSURE_POWER", "APn", [4]],
+  ["VORTICITY_COEFFICIENT", "vorticityCoefficient", [6]],
+  ["VISCOSITY_COEFFICIENT", "viscosityCoefficient", [6]],
+  ["CONSTRAINT_RELAXATION", "constraintRelaxation", [4]],
+];
+params.forEach(([paramName, glslName, depends]) =>
+  makeParameterSlider(paramName, glslName, depends)
+);

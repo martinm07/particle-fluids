@@ -1,11 +1,11 @@
 #define LINESLISTLEN 100 
 
-flat varying vec2 lambdaRef;
-flat varying vec2 sCorr_xRef;
-flat varying vec2 sCorr_yRef;
 flat varying float pRefN_startIndex;
 flat varying float pRefN_Length;
 flat varying float numExtras;
+flat varying vec2 lambdaRef;
+flat varying vec2 sCorr_xRef;
+flat varying vec2 sCorr_yRef;
 uniform vec2 nRefRes;
 uniform vec2 c1Resolution;
 uniform vec2 c3Resolution;
@@ -25,6 +25,8 @@ uniform sampler2D GPUC3_Out;
 uniform sampler2D GPUC4_Out;
 uniform sampler2D pRefN;
 uniform sampler2D pRefPN;
+
+uniform bool debug;
 
 float interpretBytesVector(vec4 bytes) {
     bytes *= 255.0;
@@ -55,8 +57,8 @@ vec2 getCoord(float index, vec2 res) {
 void main() {
     vec2 uv = gl_FragCoord.xy / resolution.xy;
     float mask = texture2D(GPUC5_Mask, uv).x * 255.0;
-    if (mask == 1.0) { // Update xStar
-        float computeIndex = (gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * resolution.x;
+    if (mask == 2.0) { // Update xStar
+        float computeIndex = (gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * resolution.x - P;
 
         float lambda_i = interpretBytesVector(texture2D(GPUC4_Out, lambdaRef).xyzw);
 
@@ -92,14 +94,16 @@ void main() {
         // IMP: In difference to the original algorithm, we adjust xStar by deltaP *before* collision response.
         ///     It may be worth it to look at both behaviours.
         vec2 xStar_xCoord = getCoord(2.0 * floor(computeIndex / 2.0) + P, c1Resolution);
-        float xStar_x = interpretBytesVector(texture2D(xStarAndVelocity, xStar_xCoord));
+        float xStar_x = interpretBytesVector(texture2D(xStarAndVelocity, xStar_xCoord).xyzw);
 
         vec2 xStar_yCoord = getCoord(2.0 * floor(computeIndex / 2.0) + 1.0 + P, c1Resolution);
-        float xStar_y = interpretBytesVector(texture2D(xStarAndVelocity, xStar_yCoord));
+        float xStar_y = interpretBytesVector(texture2D(xStarAndVelocity, xStar_yCoord).xyzw);
 
-        vec2 newXStar = vec2(xStar_x + xStar_y) + deltaP;
-        float x_x = interpretBytesVector(texture2D(X, getCoord(2.0 * floor(computeIndex / 2.0), pRes)));
-        float x_y = interpretBytesVector(texture2D(X, getCoord(2.0 * floor(computeIndex / 2.0) + 1.0, pRes)));
+        vec2 newXStar = vec2(xStar_x, xStar_y) + deltaP;
+
+        float IDpairX = 2.0 * floor(computeIndex / 2.0); float IDpairY = IDpairX + 1.0;
+        float x_x = interpretBytesVector(texture2D(X, getCoord(IDpairX, pRes)).xyzw);
+        float x_y = interpretBytesVector(texture2D(X, getCoord(IDpairY, pRes)).xyzw);
         vec2 x = vec2(x_x, x_y);
 
         //// Perform collision detection & response on `newXStar`
@@ -120,7 +124,8 @@ void main() {
         int numIntersected = 0;
         vec2 holdingPoint = vec2(0.0, 0.0);
         float holdingDistance = 0.0;
-        for (int k = 0; k < LINESLISTLEN / 4; k += 4) {
+        int k;
+        for (k = 0; k < LINESLISTLEN / 4; k += 4) {
             if (lineBounds[k] == NUL) {
                 break;
             }
@@ -177,6 +182,23 @@ void main() {
         if (numIntersected > 0) {
             newXStar = holdingPoint;
         }
+        if (newXStar.x < -20.0) {
+            newXStar.x = -20.0;
+        } else if (newXStar.x > 20.0) {
+            newXStar.x = 20.0;
+        }
+        if (newXStar.y < -20.0) {
+            newXStar.y = -20.0;
+        }
+
+        if (debug) {
+            if (mod(computeIndex, 2.0) == 0.0) {
+                gl_FragColor = interpretFloat(float(k));
+            } else {
+                gl_FragColor = interpretFloat(pRefN_Length);
+            }
+            return;
+        }
 
         // This hurts me... we're doing the exact same calculation twice since
         //  these textures only have enough space for one float per fragment.
@@ -187,7 +209,7 @@ void main() {
         } else {
             gl_FragColor = interpretFloat(newXStar.y);
         }
-    } else if (mask == 2.0) { // Pass through velocity
+    } else if (mask == 1.0) { // Pass through velocity
         // Note GPUC5 (this one) *has* to have the same size, structure and contents as GPUC1
         //  so that we can iterate on xStar multiple times. Thus, we can use `uv` here confidently.
         gl_FragColor = texture2D(xStarAndVelocity, uv).xyzw;
