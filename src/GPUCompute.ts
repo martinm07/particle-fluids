@@ -8,6 +8,7 @@ interface GPUComputeInputTexture {
 interface GPUComputeInputVarying {
   name: string;
   itemSize: number;
+  updates: boolean;
   data: Float32Array;
 }
 
@@ -18,6 +19,7 @@ interface GPUComputeConstructTexture {
 interface GPUComputeConstructVarying {
   name: string;
   itemSize: number;
+  updates?: boolean;
   data?: Float32Array;
 }
 
@@ -79,6 +81,9 @@ export class GPUCompute {
       if (gpuComputeConstructerIsVarying(_input) && !_input.data) {
         _input.data = new Float32Array(numComputes * _input.itemSize);
       }
+      if (gpuComputeConstructerIsVarying(_input) && !_input.updates) {
+        _input.updates = false;
+      }
       if (gpuComputeConstructerIsTexture(_input) && !_input.texture) {
         _input.texture = initTexture(numComputes);
       }
@@ -98,11 +103,19 @@ export class GPUCompute {
           }
         },
         set: (_target, prop, value) => {
-          if (!(prop in this._inputIndices)) return false;
+          if (!(prop in this._inputIndices))
+            throw new Error(`Input "${String(prop)}" doesn't exist.`);
           const input = this._inputs[this._inputIndices[prop]];
-          if (!gpuComputeInputIsVarying(input)) return false;
+          if (!gpuComputeInputIsVarying(input))
+            throw new Error(`Input "${String(prop)}" not a varying.`);
           const attrib = this.mesh.geometry.getAttribute("a_" + String(prop));
           if (!(attrib instanceof THREE.BufferAttribute)) return false;
+          if (value.length !== attrib.itemSize * this.length)
+            throw new Error(
+              `Array not expected length. Got ${value.length} instead of ${
+                attrib.itemSize
+              } * ${this.length} = ${attrib.itemSize * this.length}`
+            );
           attrib.set(value);
           attrib.needsUpdate = true;
           input.data = value;
@@ -120,12 +133,13 @@ export class GPUCompute {
           }
         },
         set: (_target, prop, value) => {
-          if (!(prop in this._inputIndices)) return false;
+          if (!(prop in this._inputIndices))
+            throw new Error(`Input "${String(prop)}" doesn't exist.`);
           const input = this._inputs[this._inputIndices[prop]];
-          if (!gpuComputeInputIsTexture(input)) return false;
+          if (!gpuComputeInputIsTexture(input))
+            throw new Error(`Input "${String(prop)}" not a texture.`);
           if (!(value instanceof THREE.Texture)) return false;
           this.mesh.material.uniforms[String(prop)] = { value };
-          this.mesh.material.needsUpdate = true;
           input.texture = value;
           return true;
         },
@@ -317,6 +331,9 @@ export class GPUCompute {
     this.scene.add(this.mesh);
   }
   compute(copyTexture = false) {
+    // maybe unnecessary
+    this.mesh.material.needsUpdate = true;
+
     const currentRenderTarget = this.renderer.getRenderTarget();
 
     const currentXrEnabled = this.renderer.xr.enabled;
@@ -351,6 +368,21 @@ export class GPUCompute {
     this.renderer.setRenderTarget(currentRenderTarget);
     if (copyTexture) return texture;
   }
+  // Interesting to note, if you simply put this code into the compute() function,
+  //  then it will significantly slow down performance with calls to WebGLRenderer.projectObject()
+  //  as it causes unnecessary updates in the algorithm's constraint solving loop.
+  updateVaryings() {
+    for (const input of this._inputs) {
+      if (gpuComputeInputIsVarying(input) && input.updates) {
+        const attrib = this.mesh.geometry.getAttribute(`a_${input.name}`);
+        if (!(attrib instanceof THREE.BufferAttribute))
+          throw new Error('Attribute was "InterleavedBufferAttribute".');
+        attrib.set(input.data);
+        attrib.needsUpdate = true;
+      }
+    }
+  }
+
   updateUniform(name: string, value: any) {
     this.mesh.material.uniforms[name] ??= { value };
     this.mesh.material.uniforms[name].value = value;

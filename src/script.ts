@@ -1,172 +1,17 @@
 import * as THREE from "three";
 
-import { GPUCompute } from "./GPUCompute";
-import {
-  getSizeXY,
-  floatToBytesArray,
-  bytesToFloat,
-  initTexture,
-  createTextureReference,
-  initMask,
-  isLittleEndianness,
-} from "./helper";
+import { isLittleEndianness } from "./helper";
 
-import vertexShaderCode from "./shaders/vertex-shader.glsl";
-import fragmentShaderCode from "./shaders/fragment-shader.glsl";
-import computeShader1Code from "./shaders/compute-shader-1.glsl";
-import computeShader3Code from "./shaders/compute-shader-3.glsl";
-import computeShader4Code from "./shaders/compute-shader-4.glsl";
-import computeShader5Code from "./shaders/compute-shader-5.glsl";
-import computeShader6Code from "./shaders/compute-shader-6.glsl";
-import assignPositionsCode from "./shaders/assign-positions.glsl";
+import { Algorithm } from "./Algorithm";
+import { ParticleRender } from "./ParticleRender";
 
-const NUL = -1111111;
 const MAX_NEIGHBOURS = 64;
 // There is an issue with non-power-of-2 values here- quite mysterious
 const N_PARTICLES = 16 ** 2;
-const P = 2 * N_PARTICLES;
-const N = 2 * N_PARTICLES * MAX_NEIGHBOURS;
 
 console.log(`CPU is ${isLittleEndianness ? "little-endian" : "big-endian"}`);
 
-let posTexWidth: number, posTexHeight: number;
-[posTexWidth, posTexHeight] = getSizeXY(P);
-
 const container = document.querySelector<HTMLDivElement>("#scene-container")!;
-const WIDTH = container.clientWidth;
-const HEIGHT = container.clientHeight;
-const aspect = WIDTH / HEIGHT,
-  frustumSize = 200;
-
-let renderer: THREE.WebGLRenderer;
-let scene: THREE.Scene;
-let camera: THREE.OrthographicCamera;
-let particleUniforms: { [key: string]: any };
-
-class ParticleGeometry extends THREE.BufferGeometry {
-  constructor() {
-    super();
-
-    const segments = 20;
-    const points = N_PARTICLES * (segments + 2); // +1 for center vertex, and another
-    //                                              +1 for inclusive range starting at 0; [0, segments]
-
-    const vertex = new THREE.Vector3(); // helper variable
-
-    const vertices = new THREE.BufferAttribute(new Float32Array(points * 3), 3);
-    const referencesX = new THREE.BufferAttribute(
-      new Float32Array(points * 2),
-      2
-    );
-    const referencesY = new THREE.BufferAttribute(
-      new Float32Array(points * 2),
-      2
-    );
-    const indices = [];
-
-    let v = 0;
-    function verts_push(...args: number[]) {
-      for (let i = 0; i < args.length; i++) vertices.set([args[i]], v++);
-    }
-
-    for (let i = 0; i < N_PARTICLES; i++) {
-      verts_push(0, 0, 0);
-      for (let s = 0; s <= segments; s++) {
-        const segment = (s / segments) * 2 * Math.PI;
-        vertex.x = Math.cos(segment);
-        vertex.y = Math.sin(segment);
-        verts_push(vertex.x, vertex.y, vertex.z);
-        const particleIndex = i * (segments + 1) + i;
-        if (s > 0)
-          indices.push(particleIndex + s, particleIndex + s + 1, particleIndex);
-      }
-    }
-    for (let v = 0; v < points; v++) {
-      // for each of the vertices constructing a circle, set all of them
-      //  referring to the same particle in the output gpuCompute texture,
-      //  noting that when reading the texture image- in a 1D, sequential
-      //  fashion (row by row, left to right)- every index is a particle's
-      //  x coord, and every other index is a y coord.
-      const particleIndex = Math.trunc(v / (points / N_PARTICLES));
-      const refXx = ((particleIndex * 2) % posTexWidth) / posTexWidth;
-      const refXy =
-        Math.trunc((particleIndex * 2) / posTexWidth) / posTexHeight;
-      const refYx = ((particleIndex * 2 + 1) % posTexWidth) / posTexWidth;
-      const refYy =
-        Math.trunc((particleIndex * 2 + 1) / posTexWidth) / posTexHeight;
-
-      referencesX.set([refXx, refXy], v * 2);
-      referencesY.set([refYx, refYy], v * 2);
-    }
-
-    this.setIndex(indices);
-    this.setAttribute("position", vertices);
-    this.setAttribute("referenceX", referencesX);
-    this.setAttribute("referenceY", referencesY);
-    // optional
-    this.attributes.referenceX.name = "referenceX";
-    this.attributes.referenceY.name = "referenceY";
-    this.attributes.position.name = "position";
-  }
-}
-
-let geometry: ParticleGeometry;
-function initParticleRenders() {
-  particleUniforms = {
-    color: { value: new THREE.Color(0x0000ff) },
-    texturePosition: { value: null },
-    pixelScale: { value: PIXEL_SCALE },
-  };
-  const material = new THREE.ShaderMaterial({
-    uniforms: particleUniforms,
-    vertexShader: vertexShaderCode,
-    fragmentShader: fragmentShaderCode,
-    side: THREE.DoubleSide,
-  });
-  geometry = new ParticleGeometry();
-
-  const particleMesh = new THREE.Mesh(geometry, material);
-  particleMesh.matrixAutoUpdate = false;
-  particleMesh.updateMatrix();
-  scene.add(particleMesh);
-}
-
-function init() {
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(WIDTH, HEIGHT);
-  renderer.setClearColor(0xdddddd, 1);
-  renderer.setPixelRatio(window.devicePixelRatio);
-  container.appendChild(renderer.domElement);
-
-  positions = initPositions();
-  velocities = initTexture(P);
-
-  initGPUComputes();
-
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xffffff);
-
-  camera = new THREE.OrthographicCamera(
-    (frustumSize * aspect) / -2,
-    (frustumSize * aspect) / 2,
-    frustumSize / 2,
-    frustumSize / -2
-  );
-  camera.position.z = 1;
-  scene.add(camera);
-
-  initParticleRenders();
-
-  const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
-  const linePoints = [];
-  linePoints.push(new THREE.Vector3(-20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
-  linePoints.push(new THREE.Vector3(-20 * PIXEL_SCALE, -20 * PIXEL_SCALE, 0));
-  linePoints.push(new THREE.Vector3(20 * PIXEL_SCALE, -20 * PIXEL_SCALE, 0));
-  linePoints.push(new THREE.Vector3(20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
-  const linesGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
-  const line = new THREE.Line(linesGeometry, lineMaterial);
-  scene.add(line);
-}
 
 // #region PBF Algorithm
 /*
@@ -291,450 +136,44 @@ declare the varyings.
 */
 // #endregion
 
-function initPositions(): THREE.DataTexture {
-  const texture = initTexture(P);
-  texture.needsUpdate = true;
-  const theArray = texture.image.data;
-  const test = [];
-  for (let i = 0, il = theArray.length; i < il / 4; i++) {
-    let num: number;
-    if (i % 2 === 0) {
-      // x coordinate
-      num = (i % 30) * 0.5 - 7.5;
-    } else {
-      // y coordinate
-      num = Math.floor(i / 30) * 1;
-    }
-    test.push(num);
-    theArray.set(floatToBytesArray(num), i * 4);
-  }
-  console.log(test);
-  return texture;
-}
-
-const gpuComputes: GPUCompute[] = Array(8);
-let positions: THREE.Texture;
-let velocities: THREE.Texture;
-
 // order: x1, y1, x2, y2
 const lineBounds = [
   [-20, -20, 20, -20],
   [-20, -20, -20, 200],
   [20, -20, 20, 200],
-].flat();
-lineBounds.push(NUL);
+];
 
-function initGPUComputes() {
-  // prettier-ignore
-  gpuComputes[1] = new GPUCompute(P * 2, computeShader1Code, renderer, [
-    { name: "force", itemSize: 1 },
-    { name: "positionsTexture", texture: positions },
-    { name: "velocitiesTexture", texture: velocities },
-    { name: "pReference", itemSize: 2, data: createTextureReference(P * 2, P) },
-    { name: "GPUC1_Mask", texture: initMask(P, 2) },
-  ]);
-  console.log(gpuComputes[1]);
+const particleRenderer = new ParticleRender(container, N_PARTICLES);
 
-  // x/y components combined, and for every p_ij there's a redundant p_ji, thus `... / 2 / 2`, or `... / 4`
-  gpuComputes[3] = new GPUCompute((N / 4) * 3, computeShader3Code, renderer, [
-    { name: "p_i", itemSize: 2 },
-    { name: "p_j", itemSize: 2 },
-    { name: "GPUC3_Mask", texture: initMask(N / 4, 3) },
-    { name: "xStarAndVelocity" },
-    { name: "pi_xReference", itemSize: 2 },
-    { name: "pi_yReference", itemSize: 2 },
-    { name: "pj_xReference", itemSize: 2 },
-    { name: "pj_yReference", itemSize: 2 },
-  ]);
-  gpuComputes[3].updateUniform("h", KERNEL_WIDTH);
-  gpuComputes[3].updateUniform("NUL", NUL);
+const PIXEL_SCALE = particleRenderer.params.PIXEL_SCALE;
+const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
+const linePoints = [];
+linePoints.push(new THREE.Vector3(-20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
+linePoints.push(new THREE.Vector3(-20 * PIXEL_SCALE, -20 * PIXEL_SCALE, 0));
+linePoints.push(new THREE.Vector3(20 * PIXEL_SCALE, -20 * PIXEL_SCALE, 0));
+linePoints.push(new THREE.Vector3(20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
+const linesGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+const line = new THREE.Line(linesGeometry, lineMaterial);
+particleRenderer.scene.add(line);
 
-  // x/y components combined, thus `... / 2`
-  gpuComputes[4] = new GPUCompute((P / 2) * 3, computeShader4Code, renderer, [
-    { name: "GPUC4_Mask", texture: initMask(P / 2, 3) },
-    { name: "GPUC3_Out", texture: initTexture((N / 4) * 3) },
-    { name: "pRefN_startIndex", itemSize: 1 },
-    { name: "pRefN_Length", itemSize: 1 },
-    { name: "numExtras", itemSize: 1 },
-    { name: "pRefN", texture: pRefN },
-  ]);
-  gpuComputes[4].updateUniform("NUL", NUL);
-  gpuComputes[4].updateUniform("h", KERNEL_WIDTH);
-  gpuComputes[4].updateUniform("restDensity", REST_DENSITY);
-  gpuComputes[4].updateUniform("constraintRelaxation", CONSTRAINT_RELAXATION);
-  gpuComputes[4].updateUniform("APk", ARTIFICIAL_PRESSURE_SCALE);
-  gpuComputes[4].updateUniform(
-    "APdeltaQ",
-    ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE
-  );
-  gpuComputes[4].updateUniform("APn", ARTIFICIAL_PRESSURE_POWER);
-
-  gpuComputes[5] = new GPUCompute(P * 2, computeShader5Code, renderer, [
-    { name: "GPUC5_Mask", texture: initMask(P, 2) },
-    { name: "GPUC3_Out", texture: initTexture((N / 4) * 3) },
-    { name: "GPUC4_Out", texture: initTexture((P / 2) * 3) },
-    { name: "pRefN_startIndex", itemSize: 1 },
-    { name: "pRefN_Length", itemSize: 1 },
-    { name: "numExtras", itemSize: 1 },
-    { name: "pRefN", texture: pRefN },
-    { name: "pRefPN", texture: pRefPN },
-    { name: "lambdaRef", itemSize: 2 },
-    { name: "sCorr_xRef", itemSize: 2 },
-    { name: "sCorr_yRef", itemSize: 2 },
-    { name: "xStarAndVelocity" },
-    { name: "X" },
-  ]);
-  gpuComputes[5].updateUniform("NUL", NUL);
-  gpuComputes[5].updateUniform("lineBounds", lineBounds);
-  gpuComputes[5].updateUniform("restDensity", REST_DENSITY);
-  gpuComputes[5].updateUniform("debug", false);
-
-  gpuComputes[6] = new GPUCompute(P, computeShader6Code, renderer, [
-    { name: "xStarAndVelocity" },
-    { name: "X" },
-    { name: "GPUC3_Out", texture: initTexture((N / 4) * 5) },
-    { name: "pRefN_startIndex", itemSize: 1 },
-    { name: "pRefN_Length", itemSize: 1 },
-    { name: "numExtras", itemSize: 1 },
-    { name: "pRefPN", texture: pRefPN },
-  ]);
-  gpuComputes[6].updateUniform("h", KERNEL_WIDTH);
-  gpuComputes[6].updateUniform("vorticityCoefficient", VORTICITY_COEFFICIENT);
-  gpuComputes[6].updateUniform("viscosityCoefficient", VISCOSITY_COEFFICIENT);
-  gpuComputes[6].updateUniform("debug", false);
-
-  gpuComputes[7] = new GPUCompute(P, assignPositionsCode, renderer, [
-    { name: "xStarAndVelocity" },
-  ]);
-
-  // Provide some constant uniforms for all shaders
-  const computeIDs = gpuComputes.map((_el, i) => i).flat();
-  for (const i of computeIDs) {
-    for (const c of computeIDs) {
-      if (c === i) continue;
-      gpuComputes[i].updateUniform(
-        `c${c}Resolution`,
-        new Float32Array([gpuComputes[c].sizeX, gpuComputes[c].sizeY])
-      );
-    }
-    // prettier-ignore
-    gpuComputes[i].updateUniform("pRes", new Float32Array([posTexWidth, posTexHeight]));
-    // prettier-ignore
-    gpuComputes[i].updateUniform("nRefRes", new Float32Array([pRefNsizeX, pRefNsizeY]));
-    gpuComputes[i].updateUniform("P", P);
-    gpuComputes[i].updateUniform("N", N);
-  }
-}
-
-let PIXEL_SCALE = 4;
-let GRIDSIZE = 1;
-let SOLVER_ITERATIONS = 10;
-let KERNEL_WIDTH = 1.32;
-let GRAVITY = 100;
-let REST_DENSITY = 0.85;
-let CONSTRAINT_RELAXATION = 2.2;
-let ARTIFICIAL_PRESSURE_SCALE = 0.045;
-let ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE = 0.07 * KERNEL_WIDTH;
-let ARTIFICIAL_PRESSURE_POWER = 4;
-let VORTICITY_COEFFICIENT = 0.3;
-let VISCOSITY_COEFFICIENT = 0.1;
-
-type GridMap = Map<string, number[]>;
-let gridMap: GridMap;
-function createGridMap(positions: Float32Array) {
-  const gridMap = new Map();
-  const round = (num: number) => GRIDSIZE * Math.round(num / GRIDSIZE);
-  for (let i = 0; i < positions.length / 2; i++) {
-    const coords = `${round(positions[i * 2])},${round(positions[i * 2 + 1])}`;
-    if (!gridMap.get(coords)) gridMap.set(coords, []);
-    gridMap.get(coords)?.push(i);
-  }
-  return gridMap;
-}
-function findNeighbouringParticles(
-  index: number,
-  positions: Float32Array,
-  gridMap: GridMap
-) {
-  const round = (num: number) => GRIDSIZE * Math.round(num / GRIDSIZE);
-  let neighbours: number[] = [];
-  const posIDx = round(positions[index * 2]);
-  const posIDy = round(positions[index * 2 + 1]);
-  for (let i = -1; i <= 1; i++)
-    for (let j = -1; j <= 1; j++) {
-      const id = `${posIDx + i * GRIDSIZE},${posIDy + j * GRIDSIZE}`;
-      // let cellEntries = gridMap.get(id) ?? [];
-      // cellEntries = cellEntries.filter((id_) => id_ > index);
-      neighbours.push(...(gridMap.get(id) ?? []).filter((id_) => id_ > index));
-    }
-  return neighbours;
-}
-
-const xStarBytes = new Uint8Array(P * 4);
-const xStar = new Float32Array(xStarBytes.buffer);
-
-const pRefNData = new Float32Array(N);
-const [pRefNsizeX, pRefNsizeY] = getSizeXY(N / 2);
-const pRefN = new THREE.DataTexture(
-  pRefNData,
-  pRefNsizeX,
-  pRefNsizeY,
-  THREE.RGFormat,
-  THREE.FloatType
-);
-
-const pRefPNData = new Float32Array(N / 2);
-const pRefPN = new THREE.DataTexture(
-  pRefPNData,
-  pRefNsizeX,
-  pRefNsizeY,
-  THREE.RedFormat,
-  THREE.FloatType
-);
+const sim = new Algorithm(particleRenderer.renderer, { SOLVER_ITERATIONS: 10 });
+sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds);
+// sim.step(0.0166);
+particleRenderer.setParticlePositions(sim.positions!);
+particleRenderer.render();
 
 let debug = false;
 let paused = true;
-let last = performance.now();
-let first = true;
 function render() {
-  const now = performance.now();
-  let delta = paused ? 0.0166 : (now - last) / 1000;
-  if (delta > 1) delta = 1; // Cut off for large delta values (experiment with number in future)
-  last = now;
+  sim.debug = debug;
+  sim.step(paused ? 0.0166 : undefined);
 
-  gpuComputes.forEach((gpuc) => gpuc.updateUniform("deltaT", delta));
+  particleRenderer.setParticlePositions(sim.positions!);
+  particleRenderer.render();
 
-  gpuComputes[1].varInputs.force = new Float32Array(
-    Array(P).fill([0, -GRAVITY]).flat()
-  );
-  if (first) console.log(velocities);
-  gpuComputes[1].texInputs.velocitiesTexture = velocities;
-  gpuComputes[1].texInputs.positionsTexture = positions;
-
-  gpuComputes[1].compute();
-  // prettier-ignore
-  renderer.readRenderTargetPixels(gpuComputes[1].renderTarget, 0, gpuComputes[1].sizeY / 2,
-                                  gpuComputes[1].sizeX, gpuComputes[1].sizeY / 2, xStarBytes);
-
-  gridMap = createGridMap(xStar);
-  const allNeighbours: number[][] = Array(xStar.length / 2);
-
-  const gpuc3References: { [key: string]: Float32Array } = {};
-  ["pi_x", "pi_y", "pj_x", "pj_y"].forEach(
-    (name) => (gpuc3References[name] = new Float32Array((N / 2) * 3).fill(NUL))
-  );
-
-  // The idea is to provide a start index and length (i.e. number of neighbours)
-  //  which will be good for accessing an array of values from a texture (since long varyings are no good)
-  //  which provide the indices to GPUC3_Out. The reason we can't use our start index and length on GPUC3_Out
-  //  directly is because of the "extras" we need to also include, and the locations of those follow no easy order
-  //  to be expressed by one or two numbers.
-  const pRefN_startIndex = new Float32Array((P / 2) * 3);
-  const pRefN_Length = new Float32Array((P / 2) * 3);
-  const numExtras = new Float32Array((P / 2) * 3);
-
-  const lambdaRef = new Float32Array(P * 2);
-  const sCorr_xRef = new Float32Array(P * 2);
-  const sCorr_yRef = new Float32Array(P * 2);
-
-  let accumIndex = 0;
-  let accumIndexFull = 0;
-  const IDcumsum = [];
-  for (let i = 0; i < xStar.length / 2; i++) {
-    allNeighbours[i] = findNeighbouringParticles(i, xStar, gridMap);
-    if (allNeighbours[i].length >= MAX_NEIGHBOURS) {
-      console.warn("Hit MAX_NEIGHBOURS for particle. Expect the unexpected.");
-      allNeighbours[i] = allNeighbours[i].slice(0, MAX_NEIGHBOURS);
-    }
-
-    // prettier-ignore
-    const texCoordsConstructor = (gpuCompute: GPUCompute, i: number) => [
-      ((i % gpuCompute.sizeX) + 0.5) / gpuCompute.sizeX,
-      (Math.trunc(i / gpuCompute.sizeX) + 0.5) / gpuCompute.sizeY,
-    ];
-
-    const texCoords = texCoordsConstructor.bind(null, gpuComputes[1]);
-    // prettier-ignore
-    {
-    gpuc3References.pi_x.set(Array(allNeighbours[i].length).fill(texCoords(i * 2 + P)).flat(), accumIndex);
-    gpuc3References.pi_y.set(Array(allNeighbours[i].length).fill(texCoords(i * 2 + 1 + P)).flat(), accumIndex);
-    gpuc3References.pj_x.set(allNeighbours[i].flatMap((id_) => texCoords(id_ * 2 + P)), accumIndex);
-    gpuc3References.pj_y.set(allNeighbours[i].flatMap((id_) => texCoords(id_ * 2 + 1 + P)), accumIndex);
-    }
-
-    const texNCoords = texCoordsConstructor.bind(null, gpuComputes[3]);
-    // resolves to e.g. "[6, 7, 8, 9, 10, 11]"
-    const nIDs = Array.from(
-      Array(allNeighbours[i].length),
-      (_, i) => i + accumIndex / 2
-    );
-
-    let extraIDs: number[] = Array(allNeighbours.length);
-    let extraNeighbours: number[] = Array(allNeighbours.length);
-    if (allNeighbours[i].length !== MAX_NEIGHBOURS) {
-      for (let i_ = 0; i_ < allNeighbours.length; i_++) {
-        const id = allNeighbours[i_]?.indexOf(i) ?? -1;
-        if (id !== -1) {
-          extraNeighbours[i_] = id + IDcumsum[i_];
-          extraIDs[i_] = i_;
-        }
-      }
-    }
-    extraIDs = extraIDs.flat(); // culls out "<empty slot>s"
-    extraNeighbours = extraNeighbours.flat();
-    if (nIDs.length + extraIDs.length > MAX_NEIGHBOURS) {
-      console.warn("Hit MAX_NEIGHBOURS for particle. Expect the unexpected.");
-      extraIDs = extraIDs.slice(0, MAX_NEIGHBOURS - nIDs.length);
-    }
-
-    const nRefFull = [...nIDs, ...extraNeighbours].flatMap((id_) =>
-      texNCoords(id_)
-    );
-
-    pRefN_startIndex.set([accumIndexFull / 2], i);
-    pRefN_Length.set([nRefFull.length / 2], i);
-    numExtras.set([extraIDs.length], i);
-    pRefNData.set(nRefFull, accumIndexFull);
-    pRefN.needsUpdate = true;
-
-    const texC4Coords = texCoordsConstructor.bind(null, gpuComputes[4]);
-    lambdaRef.set([...texC4Coords(i), ...texC4Coords(i)], i * 4);
-    // prettier-ignore
-    sCorr_xRef.set(Array(2).fill(texC4Coords(i + xStar.length / 2)).flat(), i * 4);
-    // prettier-ignore
-    sCorr_yRef.set(Array(2).fill(texC4Coords(i + xStar.length)).flat(), i * 4);
-
-    pRefPNData.set([...allNeighbours[i], ...extraIDs], accumIndexFull / 2);
-    pRefPN.needsUpdate = true;
-
-    IDcumsum.push(accumIndex / 2);
-    accumIndex += allNeighbours[i].length * 2;
-    accumIndexFull += nRefFull.length;
-  }
-  // Copy the varying values into each part of the mask
-  // GPUC3
-  for (let k = 1; k < 3; k++) {
-    Object.entries(gpuc3References).forEach(([_name, data]) =>
-      data.set(data.slice(0, N / 2), k * (N / 2))
-    );
-  }
-  // GPUC4
-  for (let k = 1; k < 3; k++) {
-    [pRefN_startIndex, pRefN_Length, numExtras].forEach((var_) =>
-      var_.set(var_.slice(0, P / 2), k * (P / 2))
-    );
-  }
-
-  Object.entries(gpuc3References).forEach(
-    ([name, data]) => (gpuComputes[3].varInputs[name + "Reference"] = data)
-  );
-
-  gpuComputes[4].varInputs.pRefN_startIndex = pRefN_startIndex;
-  gpuComputes[4].varInputs.pRefN_Length = pRefN_Length;
-  gpuComputes[4].varInputs.numExtras = numExtras;
-
-  // Duplicates every element once for the X and Y components of the texture
-  //  and pads the start with 0s where velocities will make a pass-through.
-  const prepareC5 = (arr: Float32Array) =>
-    new Float32Array(P * 2).map((_, i) =>
-      i >= P ? arr[Math.trunc((i - P) / 2)] : 0
-    );
-  // Pads the start with 0s
-  const prepareC5Refs = (arr: Float32Array) =>
-    new Float32Array(P * 4).map((_, i) => (i >= P * 2 ? arr[i - P * 2] : 0));
-
-  gpuComputes[5].varInputs.pRefN_startIndex = prepareC5(pRefN_startIndex);
-  gpuComputes[5].varInputs.pRefN_Length = prepareC5(pRefN_Length);
-  gpuComputes[5].varInputs.numExtras = prepareC5(numExtras);
-  gpuComputes[5].varInputs.lambdaRef = prepareC5Refs(lambdaRef);
-  gpuComputes[5].varInputs.sCorr_xRef = prepareC5Refs(sCorr_xRef);
-  gpuComputes[5].varInputs.sCorr_yRef = prepareC5Refs(sCorr_yRef);
-  gpuComputes[5].texInputs.X = positions;
-  gpuComputes[5].updateUniform("debug", debug);
-
-  let xStarAndVelocity = gpuComputes[1].renderTarget.texture;
-  for (let _ = 0; _ < SOLVER_ITERATIONS; _++) {
-    gpuComputes[3].texInputs.xStarAndVelocity = xStarAndVelocity;
-    gpuComputes[3].compute();
-
-    gpuComputes[4].texInputs.GPUC3_Out = gpuComputes[3].renderTarget.texture;
-    gpuComputes[4].compute();
-
-    gpuComputes[5].texInputs.GPUC3_Out = gpuComputes[3].renderTarget.texture;
-    gpuComputes[5].texInputs.GPUC4_Out = gpuComputes[4].renderTarget.texture;
-    gpuComputes[5].texInputs.xStarAndVelocity = xStarAndVelocity;
-    xStarAndVelocity = gpuComputes[5].compute(true)!;
-  }
-
-  const prepareC6 = (arr: Float32Array) =>
-    arr.slice(0, P).map((_, i) => arr[Math.trunc(i / 2)]);
-  gpuComputes[6].varInputs.pRefN_startIndex = prepareC6(pRefN_startIndex);
-  gpuComputes[6].varInputs.pRefN_Length = prepareC6(pRefN_Length);
-  gpuComputes[6].varInputs.numExtras = prepareC6(numExtras);
-  gpuComputes[6].texInputs.xStarAndVelocity = xStarAndVelocity;
-  gpuComputes[6].texInputs.X = positions;
-
-  if (!debug) gpuComputes[6].compute();
-  velocities = gpuComputes[6].renderTarget.texture;
-
-  gpuComputes[7].texInputs.xStarAndVelocity = xStarAndVelocity;
-  if (!debug) gpuComputes[7].compute();
-  positions = gpuComputes[7].renderTarget.texture;
-
-  particleUniforms["texturePosition"].value = positions;
-  if (debug) {
-    console.log("------------------------");
-    const gpuCompute = gpuComputes[5];
-
-    // console.log(gpuCompute.sizeX, gpuCompute.sizeY);
-    const pixelBuffer = new Uint8Array(gpuCompute.sizeX * gpuCompute.sizeY * 4);
-    renderer.readRenderTargetPixels(
-      gpuCompute.renderTarget,
-      0,
-      0,
-      gpuCompute.sizeX,
-      gpuCompute.sizeY,
-      pixelBuffer
-    );
-
-    // prettier-ignore
-    const pixelBufferFloats = Array(...pixelBuffer).map((_el, i) =>
-      i % 4 === 0 ? bytesToFloat(pixelBuffer.slice(i, i + 4)) : 0
-    ).filter((_el, i) => i % 4 === 0);
-    // console.log(pixelBufferFloats);
-    console.log(pixelBufferFloats.slice(512));
-    if (pixelBufferFloats.slice(512).every((el) => el === 0))
-      console.log(">>> All zero...");
-  }
-  if (!debug && paused) {
-    // console.log("------------------------");
-    const gpuCompute = gpuComputes[5];
-
-    // console.log(gpuCompute.sizeX, gpuCompute.sizeY);
-    const pixelBuffer = new Uint8Array(gpuCompute.sizeX * gpuCompute.sizeY * 4);
-    renderer.readRenderTargetPixels(
-      gpuCompute.renderTarget,
-      0,
-      0,
-      gpuCompute.sizeX,
-      gpuCompute.sizeY,
-      pixelBuffer
-    );
-
-    // prettier-ignore
-    const pixelBufferFloats = Array(...pixelBuffer).map((_el, i) =>
-      i % 4 === 0 ? bytesToFloat(pixelBuffer.slice(i, i + 4)) : 0
-    ).filter((_el, i) => i % 4 === 0);
-    console.log(pixelBufferFloats);
-  }
-
-  renderer.render(scene, camera);
   debug = false;
-  if (first) first = false;
   if (!paused) requestAnimationFrame(render);
 }
-init();
-render();
 
 ////////////////////// SIMULATION CONTROLS
 
@@ -752,16 +191,13 @@ debugBtn.addEventListener("click", () => {
 startStopBtn.addEventListener("click", () => {
   paused = !paused;
   nextFrameBtn.disabled = !paused;
-  if (!paused) {
-    last = performance.now() - 16;
-    requestAnimationFrame(render);
-  }
+  if (paused) sim.pause();
+  else requestAnimationFrame(render);
 });
 resetBtn.addEventListener("click", () => {
-  positions = initPositions();
-  particleUniforms["texturePosition"].value = positions;
-  velocities = initTexture(P);
-  renderer.render(scene, camera);
+  sim.init(N_PARTICLES, MAX_NEIGHBOURS);
+  particleRenderer.setParticlePositions(sim.positions!);
+  particleRenderer.render();
 });
 
 function makeParameterSlider(
@@ -772,19 +208,18 @@ function makeParameterSlider(
   const input = document.querySelector(`#${paramName}`)!;
   const inputEl = input.querySelector("input")!;
   const inputValueDisplay = input.querySelector("span")!;
-  inputEl.value = `${eval(paramName)}`;
+  inputEl.value = String(eval(`sim.params.${paramName}`));
   inputValueDisplay.textContent = inputEl.value;
   inputEl.addEventListener("input", (event) => {
     if (!(event.target instanceof HTMLInputElement)) return;
     inputValueDisplay.textContent = event.target.value;
     let value = Number.parseFloat(event.target.value);
-    eval(`${paramName} = value;`);
+    eval(`sim.params.${paramName} = value;`);
     depends.forEach((depend) =>
-      gpuComputes[depend].updateUniform(glslName, value)
+      sim.gpuComputes[depend].updateUniform(glslName, value)
     );
   });
 }
-
 const params: [string, string, number[]][] = [
   ["GRAVITY", "", []],
   ["KERNEL_WIDTH", "h", [3, 4, 6]],

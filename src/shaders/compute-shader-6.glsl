@@ -116,12 +116,12 @@ void main() {
 
     float prevX = interpretBytesVector(texture2D(X, gl_FragCoord.xy / resolution.xy).xyzw);
     if (mod(computeIndex, 2.0) == 0.0) {
-        float finalVelocity = (1.0 / deltaT) * (p_i.x - prevX);
+        float finalVelocity = (1.0 / (deltaT + EPSILON)) * (p_i.x - prevX);
         // finalVelocity += (deltaT * f_vorticity.x) + (f_viscosity.x);
         finalVelocity += f_viscosity.x;
         gl_FragColor = interpretFloat(finalVelocity);
     } else {
-        float finalVelocity = (1.0 / deltaT) * (p_i.y - prevX);
+        float finalVelocity = (1.0 / (deltaT + EPSILON)) * (p_i.y - prevX);
         // finalVelocity += (deltaT * f_vorticity.y) + (f_viscosity.y);
         finalVelocity += f_viscosity.y;
         gl_FragColor = interpretFloat(finalVelocity);
