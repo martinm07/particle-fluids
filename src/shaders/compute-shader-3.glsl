@@ -1,5 +1,5 @@
 #define PI 3.1415926538
-#define EPSILON 0.0001
+#define EPSILON 0.00001
 
 flat varying vec2 pi_xReference;
 flat varying vec2 pi_yReference;
@@ -57,7 +57,7 @@ void main() {
             gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
         }
     } else if (mask == 2.0 || mask == 3.0) {
-        // ∇W(pᵢ - pⱼ)
+        // ∇W(pᵢ - pⱼ) w.r.t. pᵢ
         if (EPSILON <= r && r <= h) {
             float dr_dpi;
             if (mask == 2.0) {

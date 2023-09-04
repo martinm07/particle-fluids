@@ -15,6 +15,7 @@ import {
   getSizeXY,
   initMask,
   initTexture,
+  texCoords,
 } from "./helper";
 
 const NUL = import.meta.env.VITE_NUL;
@@ -95,10 +96,6 @@ export class Algorithm {
   protected C4_numExtras?: Float32Array;
   protected C5_numExtras?: Float32Array;
   protected C6_numExtras?: Float32Array;
-
-  protected lambdaRef?: Float32Array;
-  protected sCorr_xRef?: Float32Array;
-  protected sCorr_yRef?: Float32Array;
 
   private P_: number = -1;
   get P(): number {
@@ -209,9 +206,6 @@ export class Algorithm {
         { name: "numExtras", itemSize: 1, updates: true },
         { name: "pRefN" },
         { name: "pRefPN" },
-        { name: "lambdaRef", itemSize: 2, updates: true },
-        { name: "sCorr_xRef", itemSize: 2, updates: true },
-        { name: "sCorr_yRef", itemSize: 2, updates: true },
         { name: "xStarAndVelocity" },
         { name: "X" },
       ]
@@ -228,7 +222,6 @@ export class Algorithm {
       [
         { name: "xStarAndVelocity" },
         { name: "X" },
-        { name: "GPUC3_Out", texture: initTexture((this.N / 4) * 5) },
         { name: "pRefN_startIndex", itemSize: 1, updates: true },
         { name: "pRefN_Length", itemSize: 1, updates: true },
         { name: "numExtras", itemSize: 1, updates: true },
@@ -284,7 +277,6 @@ export class Algorithm {
     const texture = initTexture(this.P);
     texture.needsUpdate = true;
     const theArray = texture.image.data;
-    const test = [];
     for (let i = 0, il = theArray.length; i < il / 4; i++) {
       let num: number;
       if (i % 2 === 0) {
@@ -294,10 +286,8 @@ export class Algorithm {
         // y coordinate
         num = Math.floor(i / 30) * 1;
       }
-      test.push(num);
       theArray.set(floatToBytesArray(num), i * 4);
     }
-    console.log(test);
     return texture;
   }
   initCreateInputs() {
@@ -346,10 +336,6 @@ export class Algorithm {
     this.C6_pRefN_Length = new Float32Array(this.P);
     this.C6_numExtras = new Float32Array(this.P);
 
-    this.lambdaRef = new Float32Array(this.P * 4);
-    this.sCorr_xRef = new Float32Array(this.P * 4);
-    this.sCorr_yRef = new Float32Array(this.P * 4);
-
     this.initialized = true;
   }
   initSetInputs() {
@@ -373,16 +359,11 @@ export class Algorithm {
       this.gpuComputes[3].renderTarget.texture;
     this.gpuComputes[5].texInputs.GPUC4_Out =
       this.gpuComputes[4].renderTarget.texture;
-    this.gpuComputes[5].varInputs.lambdaRef = this.lambdaRef;
-    this.gpuComputes[5].varInputs.sCorr_xRef = this.sCorr_xRef;
-    this.gpuComputes[5].varInputs.sCorr_yRef = this.sCorr_yRef;
     this.gpuComputes[5].varInputs.pRefN_startIndex = this.C5_pRefN_startIndex;
     this.gpuComputes[5].varInputs.pRefN_Length = this.C5_pRefN_Length;
     this.gpuComputes[5].varInputs.numExtras = this.C5_numExtras;
 
     this.gpuComputes[6].texInputs.pRefPN = this.pRefPN;
-    this.gpuComputes[6].texInputs.GPUC3_Out =
-      this.gpuComputes[3].renderTarget.texture;
     this.gpuComputes[6].varInputs.pRefN_startIndex = this.C6_pRefN_startIndex;
     this.gpuComputes[6].varInputs.pRefN_Length = this.C6_pRefN_Length;
     this.gpuComputes[6].varInputs.numExtras = this.C6_numExtras;
@@ -471,11 +452,6 @@ export class Algorithm {
     let accumIndexFull = 0;
     const IDcumsum: number[] = [];
 
-    const texCoordsConstructor = (gpuCompute: GPUCompute, i: number) => [
-      ((i % gpuCompute.sizeX) + 0.5) / gpuCompute.sizeX,
-      (Math.trunc(i / gpuCompute.sizeX) + 0.5) / gpuCompute.sizeY,
-    ];
-
     for (let i = 0; i < this.xStar.length / 2; i++) {
       this.allNeighbours[i] = this.findNeighbouringParticles(
         i,
@@ -493,16 +469,24 @@ export class Algorithm {
         );
       }
 
-      const texCoords = texCoordsConstructor.bind(null, this.gpuComputes[1]);
+      const texPCoords = texCoords.bind(
+        null,
+        this.gpuComputes[1].sizeX,
+        this.gpuComputes[1].sizeY
+      );
       // prettier-ignore
       {
-      this.gpuc3References.pi_x.set(Array(this.allNeighbours[i].length).fill(texCoords(i * 2 + this.P)).flat(), accumIndex);
-      this.gpuc3References.pi_y.set(Array(this.allNeighbours[i].length).fill(texCoords(i * 2 + 1 + this.P)).flat(), accumIndex);
-      this.gpuc3References.pj_x.set(this.allNeighbours[i].flatMap((id_) => texCoords(id_ * 2 + this.P)), accumIndex);
-      this.gpuc3References.pj_y.set(this.allNeighbours[i].flatMap((id_) => texCoords(id_ * 2 + 1 + this.P)), accumIndex);
+      this.gpuc3References.pi_x.set(Array(this.allNeighbours[i].length).fill(texPCoords(i * 2 + this.P)).flat(), accumIndex);
+      this.gpuc3References.pi_y.set(Array(this.allNeighbours[i].length).fill(texPCoords(i * 2 + 1 + this.P)).flat(), accumIndex);
+      this.gpuc3References.pj_x.set(this.allNeighbours[i].flatMap((id_) => texPCoords(id_ * 2 + this.P)), accumIndex);
+      this.gpuc3References.pj_y.set(this.allNeighbours[i].flatMap((id_) => texPCoords(id_ * 2 + 1 + this.P)), accumIndex);
       }
 
-      const texNCoords = texCoordsConstructor.bind(null, this.gpuComputes[3]);
+      const texNCoords = texCoords.bind(
+        null,
+        this.gpuComputes[3].sizeX,
+        this.gpuComputes[3].sizeY
+      );
       // resolves to e.g. "[6, 7, 8, 9, 10, 11]"
       const nIDs = Array.from(
         Array(this.allNeighbours[i].length),
@@ -551,24 +535,6 @@ export class Algorithm {
       );
       this.pRefPN.needsUpdate = true;
 
-      const texC4Coords = texCoordsConstructor.bind(null, this.gpuComputes[4]);
-      this.lambdaRef.set(
-        Array(2).fill(texC4Coords(i)).flat(),
-        this.P * 2 + i * 4
-      );
-      this.sCorr_xRef.set(
-        Array(2)
-          .fill(texC4Coords(i + this.P / 2))
-          .flat(),
-        this.P * 2 + i * 4
-      );
-      this.sCorr_yRef.set(
-        Array(2)
-          .fill(texC4Coords(i + this.P))
-          .flat(),
-        this.P * 2 + i * 4
-      );
-
       IDcumsum.push(accumIndex / 2);
       accumIndex += this.allNeighbours[i].length * 2;
       accumIndexFull += nRefFull.length;
@@ -607,7 +573,7 @@ export class Algorithm {
       // else this.gpuComputes[5].compute();
     }
     if (this.debug)
-      this.logComputeOut(5, (arr: Float32Array) => arr.slice(512));
+      this.logComputeOut(5, (arr: Float32Array) => arr.slice(this.P));
 
     this.gpuComputes[6].texInputs.xStarAndVelocity = xStarAndVelocity;
     this.gpuComputes[6].texInputs.X = this.positions;
@@ -674,8 +640,4 @@ class AlgorithmIsInitialized extends Algorithm {
   declare C4_numExtras: Float32Array;
   declare C5_numExtras: Float32Array;
   declare C6_numExtras: Float32Array;
-
-  declare lambdaRef: Float32Array;
-  declare sCorr_xRef: Float32Array;
-  declare sCorr_yRef: Float32Array;
 }

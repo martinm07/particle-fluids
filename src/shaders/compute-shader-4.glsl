@@ -1,10 +1,6 @@
 #define MAX_NEIGHBOURS 64
 #define PI 3.1415926538
 
-// flat varying float[MAX_NEIGHBOURS * 2] pRefN_W;
-// flat varying float[MAX_NEIGHBOURS * 2] pRefN_dWx;
-// flat varying float[MAX_NEIGHBOURS * 2] pRefN_dWy;
-// flat varying float[MAX_NEIGHBOURS] extrasMask;
 flat varying float pRefN_startIndex;
 flat varying float pRefN_Length;
 flat varying float numExtras;
@@ -19,7 +15,6 @@ uniform float APk;
 uniform float APdeltaQ;
 uniform float APn;
 
-uniform float NUL;
 uniform sampler2D GPUC3_Out;
 uniform sampler2D GPUC4_Mask;
 uniform sampler2D pRefN;
@@ -95,7 +90,6 @@ void main() {
         gl_FragColor = interpretFloat(lambda);
     // ∑ⱼ(sCorr∇W(pᵢ - pⱼ))
     } else if (mask == 2.0) {
-        // s_corr
         float APqW = (315.0 / (64.0 * PI * pow(h, 9.0))) * pow(pow(h, 2.0) - pow(APdeltaQ, 2.0), 3.0);
         float s_corr = 0.0;
         for (float j = 0.0; j < pRefN_Length; j++) {
@@ -112,7 +106,6 @@ void main() {
         }
         gl_FragColor = interpretFloat(s_corr);
     } else if (mask == 3.0) {
-        // s_corr
         float APqW = (315.0 / (64.0 * PI * pow(h, 9.0))) * pow(pow(h, 2.0) - pow(APdeltaQ, 2.0), 3.0);
         float s_corr = 0.0;
         for (float j = 0.0; j < pRefN_Length; j++) {

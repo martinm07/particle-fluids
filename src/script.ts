@@ -1,13 +1,14 @@
 import * as THREE from "three";
 
-import { isLittleEndianness } from "./helper";
+import { isLittleEndianness, formatNumber } from "./helper";
 
 import { Algorithm } from "./Algorithm";
 import { ParticleRender } from "./ParticleRender";
+import { test } from "./__tests__/Algorithm.test";
 
 const MAX_NEIGHBOURS = 64;
 // There is an issue with non-power-of-2 values here- quite mysterious
-const N_PARTICLES = 16 ** 2;
+const N_PARTICLES = 128;
 
 console.log(`CPU is ${isLittleEndianness ? "little-endian" : "big-endian"}`);
 
@@ -156,7 +157,7 @@ const linesGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
 const line = new THREE.Line(linesGeometry, lineMaterial);
 particleRenderer.scene.add(line);
 
-const sim = new Algorithm(particleRenderer.renderer, { SOLVER_ITERATIONS: 10 });
+const sim = new Algorithm(particleRenderer.renderer, { SOLVER_ITERATIONS: 3 });
 sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds);
 // sim.step(0.0166);
 particleRenderer.setParticlePositions(sim.positions!);
@@ -181,6 +182,7 @@ const nextFrameBtn = document.querySelector<HTMLButtonElement>("#next-frame")!;
 const startStopBtn = document.querySelector("#start-stop")!;
 const resetBtn = document.querySelector("#reset")!;
 const debugBtn = document.querySelector("#debug")!;
+const testBtn = document.querySelector("#test")!;
 nextFrameBtn.addEventListener("click", () => {
   requestAnimationFrame(render);
 });
@@ -195,9 +197,12 @@ startStopBtn.addEventListener("click", () => {
   else requestAnimationFrame(render);
 });
 resetBtn.addEventListener("click", () => {
-  sim.init(N_PARTICLES, MAX_NEIGHBOURS);
+  sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds);
   particleRenderer.setParticlePositions(sim.positions!);
   particleRenderer.render();
+});
+testBtn.addEventListener("click", () => {
+  test();
 });
 
 function makeParameterSlider(
@@ -209,10 +214,10 @@ function makeParameterSlider(
   const inputEl = input.querySelector("input")!;
   const inputValueDisplay = input.querySelector("span")!;
   inputEl.value = String(eval(`sim.params.${paramName}`));
-  inputValueDisplay.textContent = inputEl.value;
+  inputValueDisplay.textContent = formatNumber(inputEl.value);
   inputEl.addEventListener("input", (event) => {
     if (!(event.target instanceof HTMLInputElement)) return;
-    inputValueDisplay.textContent = event.target.value;
+    inputValueDisplay.textContent = formatNumber(event.target.value);
     let value = Number.parseFloat(event.target.value);
     eval(`sim.params.${paramName} = value;`);
     depends.forEach((depend) =>

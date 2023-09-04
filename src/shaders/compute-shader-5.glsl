@@ -3,9 +3,6 @@
 flat varying float pRefN_startIndex;
 flat varying float pRefN_Length;
 flat varying float numExtras;
-flat varying vec2 lambdaRef;
-flat varying vec2 sCorr_xRef;
-flat varying vec2 sCorr_yRef;
 uniform vec2 nRefRes;
 uniform vec2 c1Resolution;
 uniform vec2 c3Resolution;
@@ -60,6 +57,7 @@ void main() {
     if (mask == 2.0) { // Update xStar
         float computeIndex = (gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * resolution.x - P;
 
+        vec2 lambdaRef = getCoord(floor(computeIndex / 2.0), c4Resolution);
         float lambda_i = interpretBytesVector(texture2D(GPUC4_Out, lambdaRef).xyzw);
 
         vec2 deltaP = vec2(0.0, 0.0);
@@ -86,6 +84,8 @@ void main() {
 
             deltaP += (lambda_i + lambda_j) * dW;
         }
+        vec2 sCorr_xRef = getCoord(floor((computeIndex + P) / 2.0), c4Resolution);
+        vec2 sCorr_yRef = getCoord(floor(computeIndex / 2.0 + P), c4Resolution);
         float sCorr_x = interpretBytesVector(texture2D(GPUC4_Out, sCorr_xRef).xyzw);
         float sCorr_y = interpretBytesVector(texture2D(GPUC4_Out, sCorr_yRef).xyzw);
         deltaP += vec2(sCorr_x, sCorr_y);
