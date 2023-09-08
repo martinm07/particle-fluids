@@ -23,6 +23,7 @@ const NUL = import.meta.env.VITE_NUL;
 interface OptParamsSetter {
   SOLVER_ITERATIONS?: number;
   GRIDSIZE?: number;
+  BOUNDARY_MARGIN?: number;
   KERNEL_WIDTH?: number;
   GRAVITY?: number;
   REST_DENSITY?: number;
@@ -36,6 +37,7 @@ interface OptParamsSetter {
 export class SimParams {
   SOLVER_ITERATIONS: number;
   GRIDSIZE: number;
+  BOUNDARY_MARGIN: number;
   KERNEL_WIDTH: number;
   GRAVITY: number;
   REST_DENSITY: number;
@@ -49,6 +51,7 @@ export class SimParams {
   constructor(params: OptParamsSetter = {}) {
     this.SOLVER_ITERATIONS = params.SOLVER_ITERATIONS ?? 3;
     this.GRIDSIZE = params.GRIDSIZE ?? 1;
+    this.BOUNDARY_MARGIN = params.BOUNDARY_MARGIN ?? 0.01;
     this.KERNEL_WIDTH = params.KERNEL_WIDTH ?? 1.32;
     this.GRAVITY = params.GRAVITY ?? 100;
     this.REST_DENSITY = params.REST_DENSITY ?? 0.85;
@@ -212,6 +215,10 @@ export class Algorithm {
     );
     this.gpuComputes[5].updateUniform("NUL", NUL);
     this.gpuComputes[5].updateUniform("lineBounds", lineBounds_);
+    this.gpuComputes[5].updateUniform(
+      "boundaryMargin",
+      this.params.BOUNDARY_MARGIN
+    );
     this.gpuComputes[5].updateUniform("restDensity", this.params.REST_DENSITY);
     this.gpuComputes[5].updateUniform("debug", false);
 
