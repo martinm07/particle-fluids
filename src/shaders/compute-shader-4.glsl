@@ -86,7 +86,7 @@ void main() {
         C_i -= 1.0;
 
         sum_dCi2 += pow(dpi_Ci.x, 2.0) + pow(dpi_Ci.y, 2.0);
-        float lambda = C_i / (sum_dCi2 + constraintRelaxation);
+        float lambda = -1.0 * C_i / (sum_dCi2 + constraintRelaxation);
         gl_FragColor = interpretFloat(lambda);
     // ∑ⱼ(sCorr∇W(pᵢ - pⱼ))
     } else if (mask == 2.0) {

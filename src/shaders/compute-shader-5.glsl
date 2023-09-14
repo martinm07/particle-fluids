@@ -14,8 +14,10 @@ uniform float P;
 uniform sampler2D xStarAndVelocity;
 uniform sampler2D X;
 uniform float restDensity;
+uniform float boundaryMargin;
 
 uniform float NUL;
+uniform float TOL;
 uniform float[LINESLISTLEN] lineBounds;
 uniform sampler2D GPUC5_Mask;
 uniform sampler2D GPUC3_Out;
@@ -51,6 +53,39 @@ vec2 getCoord(float index, vec2 res) {
     return refCoord;
 }
 
+struct LineInfo {
+    bool isOfX;
+    float m;
+    float b;
+    vec2 p1;
+    vec2 p2;
+};
+
+// Finds the slope and y-intercept of a line (either as a function of x or y) that passes through both points
+LineInfo lineFromPoints(vec2 p1, vec2 p2) {
+    // If we are closer to the y-axis, then we'll switch to a line of `x = my + b`.
+    //  This avoids the bound on infinity as we approach a vertical line.
+    bool isOfX = abs(p1.y - p2.y) < abs(p1.x - p2.x);
+    float m;
+    float b;
+    if (isOfX) {
+        m = (p1.y - p2.y) / (p1.x - p2.x);
+        b = p1.y - m * p1.x;
+    } else {
+        m = (p1.x - p2.x) / (p1.y - p2.y);
+        b = p1.x - m * p1.y;
+    }
+    return LineInfo(isOfX, m, b, p1, p2);
+}
+
+// is `a` greater than, or equal to, `b`, also accounting for floating-point precision
+bool greater(float a, float b) {
+    return a - b > -TOL;
+}
+bool less(float a, float b) {
+    return a - b < TOL;
+}
+
 void main() {
     vec2 uv = gl_FragCoord.xy / resolution.xy;
     float mask = texture2D(GPUC5_Mask, uv).x * 255.0;
@@ -83,9 +118,10 @@ void main() {
             }
 
             deltaP += (lambda_i + lambda_j) * dW;
+            // deltaP += dW;
         }
-        vec2 sCorr_xRef = getCoord(floor((computeIndex + P) / 2.0), c4Resolution);
-        vec2 sCorr_yRef = getCoord(floor(computeIndex / 2.0 + P), c4Resolution);
+        vec2 sCorr_xRef = getCoord(floor(computeIndex / 2.0) + P / 2.0, c4Resolution);
+        vec2 sCorr_yRef = getCoord(floor(computeIndex / 2.0) + P, c4Resolution);
         float sCorr_x = interpretBytesVector(texture2D(GPUC4_Out, sCorr_xRef).xyzw);
         float sCorr_y = interpretBytesVector(texture2D(GPUC4_Out, sCorr_yRef).xyzw);
         deltaP += vec2(sCorr_x, sCorr_y);
@@ -108,72 +144,74 @@ void main() {
 
         //// Perform collision detection & response on `newXStar`
 
-        bool xAxisCloser = abs(newXStar.y - x.y) < abs(newXStar.x - x.x);
-        float w; float a;
-        // If we are closer to the y-axis, then we'll switch to a line of `x = my + b`.
-        //  This avoids the bound on infinity as we approach a vertical line.
-        if (xAxisCloser) {
-            w = (newXStar.y - x.y) / (newXStar.x - x.x);
-            a = x.y - w * x.x;
-        } else {
-            w = (newXStar.x - x.x) / (newXStar.y - x.y);
-            a = x.x - w * x.y;
-        }
-        float xXxXStar = abs(x.x - newXStar.x); float yXyXStar = abs(x.y - newXStar.y);
+        LineInfo line1 = lineFromPoints(x, newXStar);
+        float m1 = line1.m; float b1 = line1.b;
+
         vec2 intersected[LINESLISTLEN / 4];
         int numIntersected = 0;
         vec2 holdingPoint = vec2(0.0, 0.0);
         float holdingDistance = 0.0;
-        int k;
-        for (k = 0; k < LINESLISTLEN / 4; k += 4) {
+
+        float xPrime; float yPrime;
+        for (int k = 0; k < LINESLISTLEN; k += 4) {
             if (lineBounds[k] == NUL) {
                 break;
             }
             float xp1 = lineBounds[k]; float yp1 = lineBounds[k + 1];
             float xp2 = lineBounds[k + 2]; float yp2 = lineBounds[k + 3];
-
-            float m; float b;
-            bool pXAxisCloser = abs(yp2 - yp1) < abs(xp2 - xp1);
-            if (pXAxisCloser) {
-                m = (yp2 - yp1) / (xp2 - xp1);
-                if ((xAxisCloser && m == w) || (!xAxisCloser && m * w == 1.0)) {
-                    break;
-                }
-                b = yp1 - m * xp1;
-            } else {
-                m = (xp2 - xp1) / (yp2 - yp1);
-                if ((xAxisCloser && m * w == 1.0) || (!xAxisCloser && m == w)) {
-                    break;
-                }
-                b = xp1 - m * yp1;
-            }
+            vec2 p1 = vec2(xp1, yp1); vec2 p2 = vec2(xp2, yp2);
             
-            float xPrime; float yPrime;
-            if (pXAxisCloser && xAxisCloser) {
-                xPrime = (a - b) / (m - w);
-                yPrime = (m * a - w * b) / (m - w);
-            } else if (pXAxisCloser && !xAxisCloser) {
-                xPrime = (a + w * b) / (1.0 - m * w);
-                yPrime = (b + m * a) / (1.0 - m * w);
-            } else if (!pXAxisCloser && xAxisCloser) {
-                xPrime = (b + m * a) / (1.0 - m * w);
-                yPrime = (a + w * b) / (1.0 - m * w);
+            LineInfo line2 = lineFromPoints(p1, p2);
+            float m2 = line2.m; float b2 = line2.b;
+            
+            if (line1.isOfX && line2.isOfX) {
+                xPrime = (b2 - b1) / (m1 - m2);
+                yPrime = (m1 * b2 - m2 * b1) / (m1 - m2);
+            } else if (line1.isOfX && !line2.isOfX) {
+                xPrime = (b2 + m2 * b1) / (1.0 - m1 * m2);
+                yPrime = (b1 + m1 * b2) / (1.0 - m1 * m2);
+            } else if (!line1.isOfX && line2.isOfX) {
+                xPrime = (b1 + m1 * b2) / (1.0 - m1 * m2);
+                yPrime = (b2 + m2 * b1) / (1.0 - m1 * m2);
             } else {
-                xPrime = (w * b - m * a) / (w - m);
-                yPrime = (b - a) / (w - m);
+                xPrime = (m1 * b2 - m2 * b1) / (m1 - m2);
+                yPrime = (b2 - b1) / (m1 - m2);
             }
 
-            float xp1xp2 = abs(xp1 - xp2); float yp1yp2 = abs(yp1 - yp2);
-            if (abs(xp1 - xPrime) < xp1xp2 && abs(xp2 - xPrime) < xp1xp2 && 
-                abs(yp1 - yPrime) < yp1yp2 && abs(yp2 - yPrime) < yp1yp2 &&
-                abs(x.x - xPrime) < xXxXStar && abs(newXStar.x - xPrime) < xXxXStar && 
-                abs(x.y - yPrime) < yXyXStar && abs(newXStar.y - yPrime) < yXyXStar) {
+            if (greater(xPrime, min(line1.p1.x, line1.p2.x)) && less(xPrime, max(line1.p1.x, line1.p2.x)) && 
+                greater(yPrime, min(line1.p1.y, line1.p2.y)) && less(yPrime, max(line1.p1.y, line1.p2.y)) &&
+                greater(xPrime, min(line2.p1.x, line2.p2.x)) && less(xPrime, max(line2.p1.x, line2.p2.x)) &&
+                greater(yPrime, min(line2.p1.y, line2.p2.y)) && less(yPrime, max(line2.p1.y, line2.p2.y))) {
                 
                 // intersection is true
                 intersected[numIntersected] = vec2(xPrime, yPrime);
                 float distance = length(intersected[numIntersected] - x);
                 if (numIntersected == 0 || distance < holdingDistance) {
-                    holdingPoint = intersected[numIntersected];
+                    vec2 p12 = p1 - p2;
+                    vec2 xxStar = x - newXStar;
+                    float A = abs(dot(p12, xxStar) / length(p12));
+                    float H = length(xxStar);
+                    float O = sqrt(pow(H, 2.0) - pow(A, 2.0));
+                    float tanTheta = O / A; // theta = arctan(O / A), tan(theta) = O / A
+
+                    vec2 normal;
+                    if (xxStar.x * p12.y < xxStar.y * p12.x) {
+                        normal = vec2(-p12.y, p12.x);
+                    } else {
+                        normal = vec2(p12.y, -p12.x);
+                    }
+                    normal *= boundaryMargin / length(p12);
+
+                    vec2 w;
+                    if (dot(p12, xxStar) > 0.0) {
+                        // point to p1
+                        w = p12 / length(p12);
+                    } else {
+                        w = -p12 / length(p12);
+                    }
+                    w *= boundaryMargin / tanTheta;
+
+                    holdingPoint = intersected[numIntersected] + normal + w;
                     holdingDistance = distance;
                 }
                 numIntersected += 1;
@@ -182,20 +220,20 @@ void main() {
         if (numIntersected > 0) {
             newXStar = holdingPoint;
         }
-        if (newXStar.x < -20.0) {
-            newXStar.x = -20.0;
-        } else if (newXStar.x > 20.0) {
-            newXStar.x = 20.0;
-        }
-        if (newXStar.y < -20.0) {
-            newXStar.y = -20.0;
-        }
+        // if (newXStar.x < -20.0 && x.x >= -20.0) {
+        //     newXStar.x = -20.0;
+        // } else if (newXStar.x > 20.0 && x.x <= 20.0) {
+        //     newXStar.x = 20.0;
+        // }
+        // if (newXStar.y < -20.0 && x.y >= -20.0) {
+        //     newXStar.y = -20.0;
+        // }
 
         if (debug) {
             if (mod(computeIndex, 2.0) == 0.0) {
-                gl_FragColor = interpretFloat(float(k));
+                gl_FragColor = interpretFloat(xPrime);
             } else {
-                gl_FragColor = interpretFloat(pRefN_Length);
+                gl_FragColor = interpretFloat(yPrime);
             }
             return;
         }

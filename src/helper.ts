@@ -1,5 +1,6 @@
 import { DataTexture, RGBAFormat, RGFormat, RedFormat, FloatType } from "three";
 import { GPUCompute } from "./GPUCompute";
+import { TestResult } from "./__tests__/Algorithm.test";
 
 const TOL = import.meta.env.VITE_TOL;
 
@@ -85,7 +86,7 @@ export const fillArr = (len: number, num?: number) =>
   new Float32Array(
     Array(len)
       .fill(num)
-      .map((el) => el ?? Math.random() * 10 - 5)
+      .map((el) => el ?? rng() * 10 - 5)
   );
 
 export function fillBytesTexture(
@@ -105,7 +106,7 @@ export function fillBytesTexture(
       data.set(floatToBytesArray(contents[i]), i * 4);
     else if (typeof contents === "function")
       data.set(floatToBytesArray(contents(i)), i * 4);
-    else data.set(floatToBytesArray(contents ?? Math.random() * 10 - 5), i * 4);
+    else data.set(floatToBytesArray(contents ?? rng() * 10 - 5), i * 4);
   }
   return [texture, new Uint8Array(data)];
 }
@@ -142,7 +143,7 @@ export function fillFloatsTexture(
   for (let i = 0; i < data.length; i++) {
     if (contents instanceof Float32Array) data.set([contents[i]], i);
     else if (typeof contents === "function") data.set([contents(i)], i);
-    else data.set([contents ?? Math.random() * 10 - 5], i);
+    else data.set([contents ?? rng() * 10 - 5], i);
   }
   return [texture, new Float32Array(data)];
 }
@@ -195,7 +196,6 @@ export type TypedArray =
   | Uint32Array
   | Float32Array
   | Float64Array;
-export type TestResult = [success: boolean, received?: unknown];
 
 export function formatNumber(val: string | number): string {
   return (typeof val === "string" ? parseFloat(val) : val)
@@ -249,7 +249,7 @@ export function randIndices(
   const choices: number[] = [];
   for (let _ = 0; _ < (choose ?? 1); _++) {
     while (true) {
-      const choice = Math.floor(Math.random() * sourceLen);
+      const choice = Math.floor(rng() * sourceLen);
       if (!choices.includes(choice) && !blacklist.includes(choice)) {
         choices.push(choice);
         break;
@@ -258,3 +258,47 @@ export function randIndices(
   }
   return choose ? choices : choices[0];
 }
+
+// https://stackoverflow.com/a/47593316/11493659
+function cyrb128(
+  str: string
+): [h1: number, h2: number, h3: number, h4: number] {
+  let h1 = 1779033703,
+    h2 = 3144134277,
+    h3 = 1013904242,
+    h4 = 2773480762;
+  for (let i = 0, k; i < str.length; i++) {
+    k = str.charCodeAt(i);
+    h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+    h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+    h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+    h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+  }
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+  h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+  h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+  h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+  (h1 ^= h2 ^ h3 ^ h4), (h2 ^= h1), (h3 ^= h1), (h4 ^= h1);
+  return [h1 >>> 0, h2 >>> 0, h3 >>> 0, h4 >>> 0];
+}
+
+function sfc32(a: number, b: number, c: number, d: number) {
+  return function () {
+    a >>>= 0;
+    b >>>= 0;
+    c >>>= 0;
+    d >>>= 0;
+    let t = (a + b) | 0;
+    a = b ^ (b >>> 9);
+    b = (c + (c << 3)) | 0;
+    c = (c << 21) | (c >>> 11);
+    d = (d + 1) | 0;
+    t = (t + d) | 0;
+    c = (c + t) | 0;
+    return (t >>> 0) / 4294967296;
+  };
+}
+
+const seed = cyrb128("apples");
+const rng = sfc32(...seed);
+export { rng };

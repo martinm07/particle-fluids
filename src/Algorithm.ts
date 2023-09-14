@@ -19,6 +19,7 @@ import {
 } from "./helper";
 
 const NUL = import.meta.env.VITE_NUL;
+const TOL = import.meta.env.VITE_TOL;
 
 interface OptParamsSetter {
   SOLVER_ITERATIONS?: number;
@@ -214,6 +215,7 @@ export class Algorithm {
       ]
     );
     this.gpuComputes[5].updateUniform("NUL", NUL);
+    this.gpuComputes[5].updateUniform("TOL", TOL);
     this.gpuComputes[5].updateUniform("lineBounds", lineBounds_);
     this.gpuComputes[5].updateUniform(
       "boundaryMargin",
@@ -580,7 +582,11 @@ export class Algorithm {
       // else this.gpuComputes[5].compute();
     }
     if (this.debug)
-      this.logComputeOut(5, (arr: Float32Array) => arr.slice(this.P));
+      this.logComputeOut(
+        5,
+        (arr: Float32Array) =>
+          arr.slice(this.P).filter((el) => isNaN(el)).length
+      );
 
     this.gpuComputes[6].texInputs.xStarAndVelocity = xStarAndVelocity;
     this.gpuComputes[6].texInputs.X = this.positions;

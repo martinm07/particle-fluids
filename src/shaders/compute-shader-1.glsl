@@ -39,7 +39,7 @@ void main() {
         velocity += deltaT * force;
         gl_FragColor = interpretFloat(velocity);
     } else if (mask == 2.0) {
-        float xStar = position + velocity * deltaT;
+        float xStar = position + velocity * deltaT + force * deltaT * deltaT;
         gl_FragColor = interpretFloat(xStar);
     }
 }

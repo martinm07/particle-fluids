@@ -7,6 +7,7 @@ import {
   getSizeXY,
   randIndices,
   texCoords,
+  rng,
 } from "../helper";
 import { ShaderTestEnv, it, TestResult } from "./Algorithm.test";
 import lineBoundsTests from "./lineBoundsTests.json" assert { type: "json" };
@@ -176,7 +177,10 @@ export default function testGPUC5(env: ShaderTestEnv) {
       expected_.set(expected);
       result = expectToEqual(out, expected_, result);
       if (!expectToEqual(out, expected_)[0]) {
-        msg += `[${lineBounds}]-[${x}]-[${xStar}]-[${expected}]    `;
+        msg += `[${lineBounds}]-(${out.slice(
+          0,
+          expected.length
+        )})!=(${expected})    `;
       }
     }
     if (msg) result[1] = msg;
@@ -189,6 +193,7 @@ export default function testGPUC5(env: ShaderTestEnv) {
       const lineBounds = [[-100, -4, 100, -4]];
       algorithm.init(nParticles, maxNeighbours, lineBounds);
       const gpuc = algorithm.gpuComputes[5];
+      gpuc.updateUniform("boundaryMargin", 0);
 
       const P = 2 * nParticles;
       const N = 2 * nParticles * maxNeighbours;
@@ -214,7 +219,7 @@ export default function testGPUC5(env: ShaderTestEnv) {
       const c4Vals = bytesToFloats(c4Bytes);
 
       let lens = Array.from(Array(gpuc.length), (_, i) =>
-        i < P ? 0 : Math.floor(Math.random() * 10)
+        i < P ? 0 : Math.floor(rng() * 10)
       );
       lens = lens.map((el, i) => (i % 2 === 1 ? lens[i - 1] : el));
       gpuc.varInputs.pRefN_Length.set(lens);
@@ -229,8 +234,9 @@ export default function testGPUC5(env: ShaderTestEnv) {
       gpuc.varInputs.pRefN_startIndex.set(starts);
 
       let extras = Array.from(Array(gpuc.length), (_, i) =>
-        i < P ? 0 : Math.floor(Math.random() * lens[i])
+        i < P ? 0 : Math.floor(rng() * lens[i])
       );
+      extras = extras.map((el, i) => (i % 2 === 1 ? extras[i - 1] : el));
       gpuc.varInputs.numExtras.set(extras);
 
       gpuc.updateVaryings();
@@ -273,6 +279,7 @@ export default function testGPUC5(env: ShaderTestEnv) {
 
         return xStarAndVel[i] + deltaP;
       });
+      const expectedB = new Float32Array([...expected]);
       for (let i = 0; i < P / 2; i++) {
         const xStar = expected[i * 2];
         const yStar = expected[i * 2 + 1];
@@ -283,17 +290,35 @@ export default function testGPUC5(env: ShaderTestEnv) {
           //  (they're both segments of the same line after all), and since our only boundary here happens
           //  to be completely horizontal, we can solve directly for intersection's x-component `x'` in the equation:
           //  (y - y*) / (x - x*) = (y - (-4)) / (x - x')
-          expected[i * 2] = x - ((y + 4) * (x - xStar)) / (y - yStar);
-          expected[i * 2 + 1] = -4;
+          expectedB[i * 2] = x - ((y + 4) * (x - xStar)) / (y - yStar);
+          expectedB[i * 2 + 1] = -4;
+        }
+      }
+      const expected_ = new Float32Array([
+        ...xStarAndVel.slice(0, P),
+        ...expectedB,
+      ]);
+
+      // gpuc.updateUniform("debug", true);
+      // console.log(computeAndRead(gpuc).slice(P));
+      for (let i = 0; i < P; i++) {
+        const i_ = i + P;
+        const pI_x = Math.floor(i / 2) * 2;
+        const pI_y = Math.floor(i / 2) * 2 + 1;
+        if (
+          !expectToEqual(out.slice(i_, i_ + 1), expected_.slice(i_, i_ + 1))[0]
+        ) {
+          console.log(
+            `(${X[pI_x]}, ${X[pI_y]}) --> (${expected[pI_x]}, ${
+              expected[pI_y]
+            })\nx: ${out[P + pI_x]} === ${expectedB[pI_x]}\ny: ${
+              out[P + pI_y]
+            } === ${expectedB[pI_y]}`
+          );
         }
       }
 
-      // console.log(out.slice(P), expected);
-      result = expectToEqual(
-        out,
-        new Float32Array([...xStarAndVel.slice(0, P), ...expected]),
-        result
-      );
+      result = expectToEqual(out, expected_, result);
     }
     return result;
   });
