@@ -219,7 +219,11 @@ export function expectToEqual(
   const printErrors = () => {
     let final = "";
     out.forEach((el, i) => {
-      if (Math.abs(el - expected[i]) >= adjustTOL(el)) {
+      if (
+        Math.abs(el - expected[i]) >= adjustTOL(el) ||
+        isNaN(el) ||
+        isNaN(expected[i])
+      ) {
         final += `(${i})${formatNumber(el)}!=${formatNumber(expected[i])}   `;
       }
     });

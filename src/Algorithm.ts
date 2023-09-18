@@ -99,7 +99,6 @@ export class Algorithm {
   protected C6_pRefN_Length?: Float32Array;
   protected C4_numExtras?: Float32Array;
   protected C5_numExtras?: Float32Array;
-  protected C6_numExtras?: Float32Array;
 
   private P_: number = -1;
   get P(): number {
@@ -233,7 +232,6 @@ export class Algorithm {
         { name: "X" },
         { name: "pRefN_startIndex", itemSize: 1, updates: true },
         { name: "pRefN_Length", itemSize: 1, updates: true },
-        { name: "numExtras", itemSize: 1, updates: true },
         { name: "pRefPN" },
       ]
     );
@@ -343,7 +341,6 @@ export class Algorithm {
     this.C5_numExtras = new Float32Array(this.P * 2);
     this.C6_pRefN_startIndex = new Float32Array(this.P);
     this.C6_pRefN_Length = new Float32Array(this.P);
-    this.C6_numExtras = new Float32Array(this.P);
 
     this.initialized = true;
   }
@@ -375,7 +372,6 @@ export class Algorithm {
     this.gpuComputes[6].texInputs.pRefPN = this.pRefPN;
     this.gpuComputes[6].varInputs.pRefN_startIndex = this.C6_pRefN_startIndex;
     this.gpuComputes[6].varInputs.pRefN_Length = this.C6_pRefN_Length;
-    this.gpuComputes[6].varInputs.numExtras = this.C6_numExtras;
   }
 
   isInitialized(): this is AlgorithmIsInitialized {
@@ -536,7 +532,6 @@ export class Algorithm {
 
       this.C6_pRefN_startIndex.set(Array(2).fill(accumIndexFull / 2), i * 2);
       this.C6_pRefN_Length.set(Array(2).fill(nRefFull.length / 2), i * 2);
-      this.C6_numExtras.set(Array(2).fill(extraIDs.length), i * 2);
 
       this.pRefPNData.set(
         [...this.allNeighbours[i], ...extraIDs],
@@ -652,5 +647,4 @@ class AlgorithmIsInitialized extends Algorithm {
   declare C6_pRefN_Length: Float32Array;
   declare C4_numExtras: Float32Array;
   declare C5_numExtras: Float32Array;
-  declare C6_numExtras: Float32Array;
 }

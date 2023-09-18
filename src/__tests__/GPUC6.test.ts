@@ -9,6 +9,8 @@ import {
 } from "../helper";
 import { ShaderTestEnv, it, TestResult } from "./Algorithm.test";
 
+const TOL = 0.00001;
+
 export default function testGPUC6(env: ShaderTestEnv) {
   const algorithm = env.algorithm;
   const nParticles = env.nParticles;
@@ -97,14 +99,20 @@ export default function testGPUC6(env: ShaderTestEnv) {
     gpuc.updateVaryings();
 
     // Skip the first one since there v_ij = 0
-    const out = computeAndRead(gpuc).slice(1);
+    const out = computeAndRead(gpuc).slice(2);
 
+    const length = (x: number, y: number) => Math.sqrt(x ** 2 + y ** 2);
     const W = (r: number) =>
       r < h ? (315 / (64 * Math.PI * h ** 9)) * (h ** 2 - r ** 2) ** 3 : 0;
-    const expected = new Float32Array(P - 1).map((_, i_) => {
-      const i = i_ + 1;
-
-      const viscosity = W(Math.sqrt(2)) * lens[i];
+    const expected = new Float32Array(P - 2).map((_, i_) => {
+      const i = i_ + 2;
+      let viscosity = 0;
+      for (let j = 0; j < lens[i]; j++) {
+        const pji_x = xStar[2 * Math.floor(i / 2)] - xStar[0];
+        const pji_y = xStar[2 * Math.floor(i / 2) + 1] - xStar[1];
+        viscosity += W(length(pji_x, pji_y));
+      }
+      // const viscosity = W(Math.sqrt(2)) * lens[i];
       // Normally, this would be v_i + viscosity, but since v_i = xStar - X
       //  which will equal 0 in all but v_0, we don't have to bother.
       return viscosity;
@@ -162,9 +170,11 @@ export default function testGPUC6(env: ShaderTestEnv) {
     for (const nParticles of [64, 28, 30, 25, 400]) {
       algorithm.init(nParticles, maxNeighbours);
       const gpuc = algorithm.gpuComputes[6];
-      gpuc.updateUniform("vorticityCoefficient", 3.1);
-      gpuc.updateUniform("viscosityCoefficient", 2.74);
-      const deltaT = 0.8;
+      const vorticityCoef = 3.3;
+      gpuc.updateUniform("vorticityCoefficient", vorticityCoef);
+      const viscosityCoef = 1.69;
+      gpuc.updateUniform("viscosityCoefficient", viscosityCoef);
+      const deltaT = 1;
       gpuc.updateUniform("deltaT", deltaT);
       const h = 2.74;
       gpuc.updateUniform("h", h);
@@ -197,11 +207,6 @@ export default function testGPUC6(env: ShaderTestEnv) {
       }
       gpuc.varInputs.pRefN_startIndex.set(starts);
 
-      const extras = Array.from(Array(gpuc.length), (_, i) =>
-        Math.floor(Math.random() * lens[i])
-      );
-      gpuc.varInputs.numExtras.set(extras);
-
       let pRefPN: Float32Array;
       [gpuc.texInputs.pRefPN, pRefPN] = fillFloatsTexture(
         ...getSizeXY(N / 2),
@@ -220,8 +225,8 @@ export default function testGPUC6(env: ShaderTestEnv) {
       const ddW = (r: number) =>
         r < h ? (90 / (Math.PI * h ** 6)) * (h - r) : 0;
       const expected = new Float32Array(P).map((_, i) => {
-        const i_x = Math.floor(i / 2);
-        const i_y = Math.floor(i / 2) + 1;
+        const i_x = Math.floor(i / 2) * 2;
+        const i_y = Math.floor(i / 2) * 2 + 1;
 
         const vi = (1 / deltaT) * (xStar[i] - X[i]);
 
@@ -242,19 +247,22 @@ export default function testGPUC6(env: ShaderTestEnv) {
             (1 / deltaT) * (xStar[j_x] - X[j_x] - (xStar[i_x] - X[i_x]));
           const vij_y =
             (1 / deltaT) * (xStar[j_y] - X[j_y] - (xStar[i_y] - X[i_y]));
-          const dpjW_x = (-(xStar[i_x] - xStar[j_x]) / r) * dW(r);
-          const dpjW_y = (-(xStar[i_y] - xStar[j_y]) / r) * dW(r);
+          const dpjW_x = (-(xStar[i_x] - xStar[j_x]) / (r + TOL)) * dW(r);
+          const dpjW_y = (-(xStar[i_y] - xStar[j_y]) / (r + TOL)) * dW(r);
           vorticity += vij_x * dpjW_y - vij_y * dpjW_x;
 
-          dVorticity_x += vij_y * ((xStar[i_x] - xStar[j_x]) / r) ** 2 * ddW(r);
+          dVorticity_x +=
+            vij_y * ((xStar[i_x] - xStar[j_x]) / (r + TOL)) ** 2 * ddW(r);
           dVorticity_y +=
-            -vij_x * ((xStar[i_y] - xStar[j_y]) / r) ** 2 * ddW(r);
+            -vij_x * ((xStar[i_y] - xStar[j_y]) / (r + TOL)) ** 2 * ddW(r);
         }
 
         const f_vorticity =
           (vorticity * (i % 2 === 0 ? dVorticity_x : dVorticity_y)) /
-          length(dVorticity_x, dVorticity_y);
-        return vi + 2.74 * viscosity + deltaT * 3.1 * f_vorticity;
+          (length(dVorticity_x, dVorticity_y) + TOL);
+        return (
+          vi + viscosityCoef * viscosity + deltaT * vorticityCoef * f_vorticity
+        );
       });
 
       result = expectToEqual(out, expected, result);
