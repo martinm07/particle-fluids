@@ -10,7 +10,6 @@ import assignPositionsCode from "./shaders/assign-positions.glsl";
 import { GPUCompute } from "./GPUCompute";
 import {
   bytesToFloat,
-  createTextureReference,
   floatToBytesArray,
   getSizeXY,
   initMask,
@@ -136,11 +135,6 @@ export class Algorithm {
         { name: "force", itemSize: 1 },
         { name: "positionsTexture" },
         { name: "velocitiesTexture" },
-        {
-          name: "pReference",
-          itemSize: 2,
-          data: createTextureReference(this.P * 2, this.P),
-        },
         { name: "GPUC1_Mask", texture: initMask(this.P, 2) },
       ]
     );

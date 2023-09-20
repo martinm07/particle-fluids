@@ -1,12 +1,12 @@
-// uniform sampler2D forcesTexture;
 flat varying float force;
 uniform sampler2D positionsTexture;
 uniform sampler2D velocitiesTexture;
-flat varying vec2 pReference;
 
 uniform sampler2D GPUC1_Mask;
 
 uniform float deltaT;
+uniform float P;
+uniform vec2 pRes;
 
 float interpretBytesVector(vec4 bytes) {
     bytes *= 255.0;
@@ -27,19 +27,30 @@ vec4 interpretFloat(float num) {
                 float((4278190080u & numBits) >> 24) / 255.0);
 }
 
+vec2 getCoord(float index, vec2 res) {
+    float refX = mod(index, res.x) + 0.5;
+    float refY = trunc(index / res.x) + 0.5;
+    vec2 refCoord = vec2(refX, refY) / res;
+    return refCoord;
+}
+
 void main() {
     vec2 uv = gl_FragCoord.xy / resolution.xy;
-
-    float position = interpretBytesVector(texture2D(positionsTexture, pReference).xyzw);
-    float velocity = interpretBytesVector(texture2D(velocitiesTexture, pReference).xyzw);
 
     float mask = texture2D(GPUC1_Mask, uv).x * 255.0;
 
     if (mask == 1.0) {
-        velocity += deltaT * force;
-        gl_FragColor = interpretFloat(velocity);
+        float computeIndex = (gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * resolution.x;
+
+        vec2 pCoord = getCoord(computeIndex, pRes);
+        float velocity = interpretBytesVector(texture2D(velocitiesTexture, pCoord).xyzw);
+        gl_FragColor = interpretFloat(velocity + deltaT * force);
+
     } else if (mask == 2.0) {
-        float xStar = position + velocity * deltaT + force * deltaT * deltaT;
-        gl_FragColor = interpretFloat(xStar);
+        float computeIndex = (gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * resolution.x - P;
+        vec2 pCoord = getCoord(computeIndex, pRes);
+        float position = interpretBytesVector(texture2D(positionsTexture, pCoord).xyzw);
+        float velocity = interpretBytesVector(texture2D(velocitiesTexture, pCoord).xyzw);
+        gl_FragColor = interpretFloat(position + deltaT * velocity + deltaT * deltaT * force);
     }
 }

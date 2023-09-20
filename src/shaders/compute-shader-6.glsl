@@ -114,6 +114,31 @@ void main() {
 
     vec2 f_viscosity = viscosityCoefficient * viscosity;
 
+    /* If we get the chance to determine if this particle has collided with a boundary 
+        (and said boundary it collided with), then we can use the following to reflect
+        the velocity component perpendicular to the surface.
+    
+    if (numIntersected > 0) { // reflect the velocity
+        vec2 p1 = boundaryLine.p1; vec2 p2 = boundaryLine.p2;
+        vec2 p12 = (p1 - p2) / length(p1 - p2);
+        vec2 xxStar = x - xStar;
+
+        // since we only use the (updated) velocity to go from x to xStar,
+        //  if we point at x here we're guarunteed to oppose the velocity we want to reflect.
+        vec2 normal;
+        if (xxStar.x * p12.y < xxStar.y * p12.x) {
+            normal = vec2(-p12.y, p12.x);
+        } else {
+            normal = vec2(p12.y, -p12.x);
+        }
+        float theta = atan(normal.y, normal.x);
+
+        float newVelX = -cos(2.0 * theta) * vel.x - sin(2.0 * theta) * vel.y;
+        float newVelY = cos(2.0 * theta) * vel.y - sin(2.0 * theta) * vel.x;
+        vel = vec2(newVelX, newVelY);
+    }
+    */
+
     if (mod(computeIndex, 2.0) == 0.0) {
         float finalVelocity = v_i.x + (deltaT * f_vorticity.x) + (f_viscosity.x);
         gl_FragColor = interpretFloat(finalVelocity);
