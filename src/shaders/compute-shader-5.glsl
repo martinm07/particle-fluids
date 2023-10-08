@@ -17,7 +17,6 @@ uniform float restDensity;
 uniform float boundaryMargin;
 
 uniform float NUL;
-uniform float TOL;
 uniform float[LINESLISTLEN] lineBounds;
 uniform sampler2D GPUC5_Mask;
 uniform sampler2D GPUC3_Out;
@@ -76,14 +75,6 @@ LineInfo lineFromPoints(vec2 p1, vec2 p2) {
         b = p1.x - m * p1.y;
     }
     return LineInfo(isOfX, m, b, p1, p2);
-}
-
-// is `a` greater than, or equal to, `b`, also accounting for floating-point precision
-bool greater(float a, float b) {
-    return a - b > -TOL;
-}
-bool less(float a, float b) {
-    return a - b < TOL;
 }
 
 void main() {
@@ -147,7 +138,6 @@ void main() {
         LineInfo line1 = lineFromPoints(x, newXStar);
         float m1 = line1.m; float b1 = line1.b;
 
-        vec2 intersected[LINESLISTLEN / 4];
         int numIntersected = 0;
         vec2 holdingPoint = vec2(0.0, 0.0);
         float holdingDistance = 0.0;
@@ -159,8 +149,74 @@ void main() {
             }
             float xp1 = lineBounds[k]; float yp1 = lineBounds[k + 1];
             float xp2 = lineBounds[k + 2]; float yp2 = lineBounds[k + 3];
-            vec2 p1 = vec2(xp1, yp1); vec2 p2 = vec2(xp2, yp2);
+            vec2 p1Core = vec2(xp1, yp1); vec2 p2Core = vec2(xp2, yp2);
+            vec2 p12 = p1Core - p2Core;
             
+            // is oriented for anti-clockwise rotation from core
+            bool isAC = p12.y * (newXStar.x - x.x) > p12.x * (newXStar.y - x.y);
+
+            vec2 normal;
+            if (isAC) {
+                normal = vec2(-p12.y, p12.x) / length(p12);
+            } else {
+                normal = vec2(p12.y, -p12.x) / length(p12);
+            }
+            vec2 p1 = p1Core + boundaryMargin * normal; vec2 p2 = p2Core + boundaryMargin * normal;
+            vec2 p12Core = p12;
+            p12 = p1 - p2;
+
+            // Determine if we're perhaps gonna intersect with the side between p12 and the boundaryMargin line
+            // See: https://www.desmos.com/geometry/xhl80mgmuh for visuals and logic explanation.
+
+            bool xCloserP1 = abs(dot(p1 - x, p12)) < abs(dot(p2 - x, p12));
+            bool xInSpan = dot(p1 - x, p12) * dot(p2 - x, p12) <= 0.0;
+            bool xPastMargin = dot(x - p1, normal) <= 0.0;
+
+            float xProximity = dot(x - p1Core, normal);
+            bool xInMarginHalfStreet = xProximity > 0.0 && xProximity < boundaryMargin;
+            bool xInBox = xInMarginHalfStreet && xInSpan;
+            
+            bool isSideIntersecting = false;
+            if (xPastMargin && !xInSpan) {
+                isSideIntersecting = true;
+            } else if ((!xPastMargin && !xInSpan) || xInBox) {
+                // This is related to trying to find the acute angle between our two lines.
+                //  See the method explained here: https://www.desmos.com/geometry/zoifeitjev
+                float A = abs(dot(p12, x - newXStar) / length(p12));
+                float H = length(x - newXStar);
+                float O = sqrt(pow(H, 2.0) - pow(A, 2.0));
+
+                vec2 c;
+                if (xCloserP1) {
+                    c = p1;
+                } else {
+                    c = p2;
+                }
+                float parProx = abs(dot(x - c, normal));
+                float perpProx = abs(dot(x - c, p12 / length(p12)));
+                // if A = 0, then p12 and xxStar are perpendicular, outside the span they're never gonna intersect anyways.
+                // if perpProx is the tiniest bit outside the span (resulting in unstable/infinite fraction),
+                //  then it (should be) impossible to ever intersect with the side, which matches up with the condition failing.
+                // if both A and perpProx are tiny/0, then it may arbitrarily decide between being a side intersection or not.
+                //  if it chooses side, then x' will probably be something ridiculous and the point is allowed to sidle by, next
+                //  to the perpendicular boundary. If it chooses not side, then probably the same thing will happen because of
+                //  the isInSpan check, but may be stopped at the corner. All these cases of behaviour are fine.
+                if ((O / A > parProx / perpProx && !xInBox) ||
+                    (O / A < parProx / perpProx &&  xInBox)) {
+                    isSideIntersecting = true;
+                }
+            }
+
+            if (isSideIntersecting) {
+                if (xCloserP1) {
+                    p1 = p1Core + boundaryMargin * normal;
+                    p2 = p1Core - boundaryMargin * normal;
+                } else {
+                    p1 = p2Core - boundaryMargin * normal;
+                    p2 = p2Core + boundaryMargin * normal;
+                }
+            }
+
             LineInfo line2 = lineFromPoints(p1, p2);
             float m2 = line2.m; float b2 = line2.b;
             
@@ -178,40 +234,32 @@ void main() {
                 yPrime = (b2 - b1) / (m1 - m2);
             }
 
-            if (greater(xPrime, min(line1.p1.x, line1.p2.x)) && less(xPrime, max(line1.p1.x, line1.p2.x)) && 
-                greater(yPrime, min(line1.p1.y, line1.p2.y)) && less(yPrime, max(line1.p1.y, line1.p2.y)) &&
-                greater(xPrime, min(line2.p1.x, line2.p2.x)) && less(xPrime, max(line2.p1.x, line2.p2.x)) &&
-                greater(yPrime, min(line2.p1.y, line2.p2.y)) && less(yPrime, max(line2.p1.y, line2.p2.y))) {
-                
+            if (line1.isOfX ^^ line2.isOfX) { // exclusive OR
+                if (m1 * m2 == 1.0) {
+                    continue;
+                }
+            } else {
+                if (m1 == m2) {
+                    continue;
+                }
+            }
+
+            vec2 prime = vec2(xPrime, yPrime);
+            bool shiftedCloser = length(prime - x) < length(newXStar - x);
+            // This line can probably be optimized (visualised: https://www.desmos.com/geometry/xkcz47r1mp)
+            bool isInSpan = dot(p1 - prime, p12) * dot(p2 - prime, p12) <= 0.0;
+            
+            vec2 p_ac = vec2(-p12Core.y, p12Core.x);
+            bool isBetween = dot(x - p1Core, p_ac) * dot(newXStar - p1Core, p_ac) <= 0.0;
+            bool xStarCloser = abs(p12Core.x * (newXStar.y - p1Core.y) - p12Core.y * (newXStar.x - p1Core.x)) <
+                               abs(p12Core.x * (x.y        - p1Core.y) - p12Core.y * (x.x        - p1Core.x));
+            bool isPointedAt = isBetween || xStarCloser;
+
+            if ((shiftedCloser && isInSpan && isPointedAt && newXStar != x) || xInBox) {
                 // intersection is true
-                intersected[numIntersected] = vec2(xPrime, yPrime);
-                float distance = length(intersected[numIntersected] - x);
+                float distance = length(prime - x);
                 if (numIntersected == 0 || distance < holdingDistance) {
-                    vec2 p12 = p1 - p2;
-                    vec2 xxStar = x - newXStar;
-                    float A = abs(dot(p12, xxStar) / length(p12));
-                    float H = length(xxStar);
-                    float O = sqrt(pow(H, 2.0) - pow(A, 2.0));
-                    float tanTheta = O / A; // theta = arctan(O / A), tan(theta) = O / A
-
-                    vec2 normal;
-                    if (xxStar.x * p12.y < xxStar.y * p12.x) {
-                        normal = vec2(-p12.y, p12.x);
-                    } else {
-                        normal = vec2(p12.y, -p12.x);
-                    }
-                    normal *= boundaryMargin / length(p12);
-
-                    vec2 w;
-                    if (dot(p12, xxStar) > 0.0) {
-                        // point to p1
-                        w = p12 / length(p12);
-                    } else {
-                        w = -p12 / length(p12);
-                    }
-                    w *= boundaryMargin / tanTheta;
-
-                    holdingPoint = intersected[numIntersected] + normal + w;
+                    holdingPoint = prime;
                     holdingDistance = distance;
                 }
                 numIntersected += 1;
@@ -220,20 +268,29 @@ void main() {
         if (numIntersected > 0) {
             newXStar = holdingPoint;
         }
-        // if (newXStar.x < -20.0 && x.x >= -20.0) {
-        //     newXStar.x = -20.0;
-        // } else if (newXStar.x > 20.0 && x.x <= 20.0) {
-        //     newXStar.x = 20.0;
+
+        //// Stable, reference behaviour of floor and two walls that extend out to infinity.
+        // float lWall = -20.0 + boundaryMargin; float rWall = 20.0 - boundaryMargin; float bWall = -20.0 + boundaryMargin; float tWall = 200.0;
+        // if (newXStar.x < lWall) {
+        //     newXStar.y += (x.y - newXStar.y) / (x.x - newXStar.x) * abs(newXStar.x - lWall);
+        //     newXStar.x = lWall;
+        // } else if (newXStar.x > rWall) {
+        //     newXStar.y -= (x.y - newXStar.y) / (x.x - newXStar.x) * abs(newXStar.x - rWall);
+        //     newXStar.x = rWall;
         // }
-        // if (newXStar.y < -20.0 && x.y >= -20.0) {
-        //     newXStar.y = -20.0;
+        // if (newXStar.y < bWall) {
+        //     newXStar.x += (x.x - newXStar.x) / (x.y - newXStar.y) * abs(newXStar.y - bWall);
+        //     newXStar.y = bWall;
+        // } else if (newXStar.y > tWall) {
+        //     newXStar.x -= (x.x - newXStar.x) / (x.y - newXStar.y) * abs(newXStar.y - tWall);
+        //     newXStar.y = tWall;
         // }
 
         if (debug) {
             if (mod(computeIndex, 2.0) == 0.0) {
-                gl_FragColor = interpretFloat(xPrime);
+                gl_FragColor = interpretFloat(newXStar.x);
             } else {
-                gl_FragColor = interpretFloat(yPrime);
+                gl_FragColor = interpretFloat(newXStar.y);
             }
             return;
         }

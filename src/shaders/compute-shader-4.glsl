@@ -101,6 +101,9 @@ void main() {
             float index = indexCoord.x + indexCoord.y * c3Resolution.x;
             vec2 dWx_coord = getCoord(index + (N / 4.0), c3Resolution);
             float dWi_x = interpretBytesVector(texture2D(GPUC3_Out, dWx_coord).xyzw);
+            if (j >= pRefN_Length - numExtras) {
+                dWi_x *= -1.0;
+            }
 
             s_corr += -1.0 * APk * pow(W_ij / APqW, APn) * dWi_x;
         }
@@ -117,6 +120,9 @@ void main() {
             float index = indexCoord.x + indexCoord.y * c3Resolution.x;
             vec2 dWy_coord = getCoord(index + 2.0 * N / 4.0, c3Resolution);
             float dWi_y = interpretBytesVector(texture2D(GPUC3_Out, dWy_coord).xyzw);
+            if (j >= pRefN_Length - numExtras) {
+                dWi_y *= -1.0;
+            }
 
             s_corr += -1.0 * APk * pow(W_ij / APqW, APn) * dWi_y;
         }

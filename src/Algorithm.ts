@@ -18,7 +18,6 @@ import {
 } from "./helper";
 
 const NUL = import.meta.env.VITE_NUL;
-const TOL = import.meta.env.VITE_TOL;
 
 interface OptParamsSetter {
   SOLVER_ITERATIONS?: number;
@@ -51,18 +50,18 @@ export class SimParams {
   constructor(params: OptParamsSetter = {}) {
     this.SOLVER_ITERATIONS = params.SOLVER_ITERATIONS ?? 3;
     this.GRIDSIZE = params.GRIDSIZE ?? 1;
-    this.BOUNDARY_MARGIN = params.BOUNDARY_MARGIN ?? 0.01;
+    this.BOUNDARY_MARGIN = params.BOUNDARY_MARGIN ?? 0.5;
     this.KERNEL_WIDTH = params.KERNEL_WIDTH ?? 1.32;
-    this.GRAVITY = params.GRAVITY ?? 100;
-    this.REST_DENSITY = params.REST_DENSITY ?? 0.85;
-    this.CONSTRAINT_RELAXATION = params.CONSTRAINT_RELAXATION ?? 2.2;
-    this.ARTIFICIAL_PRESSURE_SCALE = params.ARTIFICIAL_PRESSURE_SCALE ?? 0.045;
+    this.GRAVITY = params.GRAVITY ?? 250;
+    this.REST_DENSITY = params.REST_DENSITY ?? 0.52;
+    this.CONSTRAINT_RELAXATION = params.CONSTRAINT_RELAXATION ?? 5;
+    this.ARTIFICIAL_PRESSURE_SCALE = params.ARTIFICIAL_PRESSURE_SCALE ?? 0.069;
     this.ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE =
       params.ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE ??
       0.07 * this.KERNEL_WIDTH;
     this.ARTIFICIAL_PRESSURE_POWER = params.ARTIFICIAL_PRESSURE_POWER ?? 4;
-    this.VORTICITY_COEFFICIENT = params.VORTICITY_COEFFICIENT ?? 0.3;
-    this.VISCOSITY_COEFFICIENT = params.VISCOSITY_COEFFICIENT ?? 0.1;
+    this.VORTICITY_COEFFICIENT = params.VORTICITY_COEFFICIENT ?? 1;
+    this.VISCOSITY_COEFFICIENT = params.VISCOSITY_COEFFICIENT ?? 0.4;
   }
 }
 type GridMap = Map<string, number[]>;
@@ -208,7 +207,6 @@ export class Algorithm {
       ]
     );
     this.gpuComputes[5].updateUniform("NUL", NUL);
-    this.gpuComputes[5].updateUniform("TOL", TOL);
     this.gpuComputes[5].updateUniform("lineBounds", lineBounds_);
     this.gpuComputes[5].updateUniform(
       "boundaryMargin",
@@ -418,7 +416,7 @@ export class Algorithm {
       const now = performance.now();
       if (this.last === -1) this.last = now - 16.6;
       delta = (now - this.last) / 1000;
-      if (delta > 1) delta = 1; // Cut off for large delta values (experiment with number in future)
+      if (delta > 0.02) delta = 0.02;
       this.last = now;
     } else {
       delta = fixedDeltaT!;
@@ -568,14 +566,20 @@ export class Algorithm {
 
       this.gpuComputes[5].texInputs.xStarAndVelocity = xStarAndVelocity;
       xStarAndVelocity = this.gpuComputes[5].compute(true)!;
-      // else this.gpuComputes[5].compute();
     }
     if (this.debug)
-      this.logComputeOut(
-        5,
-        (arr: Float32Array) =>
-          arr.slice(this.P).filter((el) => isNaN(el)).length
-      );
+      this.logComputeOut(5, (arr_: Float32Array) => {
+        const arr = arr_.slice(this.P);
+        return [
+          arr.filter(
+            (_, i) =>
+              arr[Math.floor(i / 2) * 2] < -20 ||
+              arr[Math.floor(i / 2) * 2] > 20 ||
+              arr[Math.floor(i / 2) * 2 + 1] < -20
+          ),
+          arr.filter((el) => isNaN(el) || !isFinite(el)).length,
+        ];
+      });
 
     this.gpuComputes[6].texInputs.xStarAndVelocity = xStarAndVelocity;
     this.gpuComputes[6].texInputs.X = this.positions;

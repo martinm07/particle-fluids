@@ -114,12 +114,41 @@ void main() {
 
     vec2 f_viscosity = viscosityCoefficient * viscosity;
 
+    vec2 x = pPrev_i; vec2 xStar = p_i;
+
+    float xPrime; float yPrime;
+    vec2 p1; vec2 p2;
+    vec2 holdingPoint; int numIntersected = 0;
+    // if (xStar != x) {
+    //     if (abs(xStar.x + 19.5) < 0.001) {
+    //         yPrime = xStar.y - (x.y - xStar.y) / (x.x - xStar.x) * abs(xStar.x + 20.0);
+    //         xPrime = -20.0;
+    //         holdingPoint = vec2(xPrime, yPrime); numIntersected++;
+    //         p1 = vec2(-20.0, -100.0); p2 = vec2(-20.0, 100.0);
+    //     } else if (abs(xStar.x - 19.5) < 0.001) {
+    //         yPrime = xStar.y - (x.y - xStar.y) / (x.x - xStar.x) * abs(xStar.x - 20.0);
+    //         xPrime = 20.0;
+    //         holdingPoint = vec2(xPrime, yPrime); numIntersected++;
+    //         p1 = vec2(20.0, -100.0); p2 = vec2(20.0, 100.0);
+    //     }
+    //     if (abs(xStar.y + 19.5) < 0.001) {
+    //         xPrime = xStar.x + (x.x - xStar.x) / (x.y - xStar.y) * abs(xStar.y + 20.0);
+    //         yPrime = -20.0;
+    //         numIntersected++;
+    //         p1 = vec2(-100.0, -20.0); p2 = vec2(100.0, -20.0);
+    //     }
+    //     if (length(vec2(xPrime, yPrime) - x) < length(holdingPoint - x)) {
+    //         holdingPoint = vec2(xPrime, yPrime);
+    //     }
+    // }
+
     /* If we get the chance to determine if this particle has collided with a boundary 
         (and said boundary it collided with), then we can use the following to reflect
-        the velocity component perpendicular to the surface.
+        the velocity component perpendicular to the surface. */
     
+    float absorbency = 0.7;
     if (numIntersected > 0) { // reflect the velocity
-        vec2 p1 = boundaryLine.p1; vec2 p2 = boundaryLine.p2;
+        // vec2 p1 = boundaryLine.p1; vec2 p2 = boundaryLine.p2;
         vec2 p12 = (p1 - p2) / length(p1 - p2);
         vec2 xxStar = x - xStar;
 
@@ -133,11 +162,10 @@ void main() {
         }
         float theta = atan(normal.y, normal.x);
 
-        float newVelX = -cos(2.0 * theta) * vel.x - sin(2.0 * theta) * vel.y;
-        float newVelY = cos(2.0 * theta) * vel.y - sin(2.0 * theta) * vel.x;
-        vel = vec2(newVelX, newVelY);
+        float newVelX = -cos(2.0 * theta) * v_i.x - sin(2.0 * theta) * v_i.y;
+        float newVelY = cos(2.0 * theta) * v_i.y - sin(2.0 * theta) * v_i.x;
+        v_i = vec2((1.0 - absorbency) * newVelX, (1.0 - absorbency) * newVelY);
     }
-    */
 
     if (mod(computeIndex, 2.0) == 0.0) {
         float finalVelocity = v_i.x + (deltaT * f_vorticity.x) + (f_viscosity.x);

@@ -197,7 +197,7 @@ export default function testGPUC4(env: ShaderTestEnv) {
         Math.floor(Math.random() * 15)
       );
       const NExtras = Array.from(Array(P / 2), (_, i) =>
-        Math.floor(Math.random() * gpuc.varInputs.pRefN_Length[i])
+        Math.floor(Math.random() * NLength[i])
       );
 
       for (let k = 0; k <= 2; k++) {

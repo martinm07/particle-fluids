@@ -142,6 +142,7 @@ const lineBounds = [
   [-20, -20, 20, -20],
   [-20, -20, -20, 200],
   [20, -20, 20, 200],
+  [-20, 200, 20, 200],
 ];
 
 const particleRenderer = new ParticleRender(container, N_PARTICLES);
