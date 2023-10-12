@@ -1,8 +1,28 @@
 {
-  "name": "threejs-demo",
-  "private": true,
-  "version": "0.0.0",
+  "name": "particle-fluids",
+  "version": "1.0.1",
+  "repository": {
+    "url": "https://github.com/martinm07/ThreeJS-PBF-Algorithm"
+  },
+  "author": {
+    "email": "martin.github07@gmail.com",
+    "name": "Martin Molnar"
+  },
+  "license": "MIT",
   "type": "module",
+  "files": [
+    "dist",
+    "src/img/fluid-splash.png",
+    "src/img/fluid-still.png"
+  ],
+  "main": "./dist/particle-fluids.umd.cjs",
+  "module": "./dist/particle-fluids.js",
+  "exports": {
+    ".": {
+      "import": "./dist/particle-fluids.js",
+      "require": "./dist/particle-fluids.umd.cjs"
+    }
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -15,6 +35,7 @@
     "@types/three": "^0.152.1",
     "typescript": "^5.0.2",
     "vite": "^4.3.9",
+    "vite-plugin-dts": "^3.6.0",
     "vite-plugin-glsl": "^1.1.2"
   }
 }

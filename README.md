@@ -1,4 +1,62 @@
 # ThreeJS-PBF-Algorithm
+
 Implementing "Position Based Fluids" by M. Macklin et al. using Three.js for GPGPU.
 
-Running on GitHub Codespaces: `npx vite --port 5173 --host 0.0.0.0`
+There are currently two exposed classes: `ParticleRender` and `Algorithm`. This package is not yet ready for real use. Please check back again in the near future.
+
+![Blue fluid particles splashing after fall](src/img/fluid-splash.png)
+
+![Blue fluid particles in a mostly resting state](src/img/fluid-still.png)
+
+### Example
+
+```typescript
+import { Algorithm, ParticleRender } from "particle-fluids";
+
+const MAX_NEIGHBOURS = 64;
+const N_PARTICLES = 128;
+
+// Make sure this <canvas> element exists in the HTML
+const container = document.querySelector<HTMLDivElement>("#scene-container")!;
+
+const lineBounds = [
+  [-20, -20, 20, -20],
+  [-20, -20, -20, 200],
+  [20, -20, 20, 200],
+  [-20, 200, 20, 200],
+];
+
+const particleRenderer = new ParticleRender(container, N_PARTICLES);
+const sim = new Algorithm(particleRenderer.renderer, { SOLVER_ITERATIONS: 3 });
+sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds);
+
+particleRenderer.setParticlePositions(sim.positions!);
+particleRenderer.render();
+
+let debug = false;
+let paused = true;
+function render() {
+  sim.debug = debug;
+  sim.step(paused ? 0.0166 : undefined);
+
+  particleRenderer.setParticlePositions(sim.positions!);
+  particleRenderer.render();
+
+  debug = false;
+  if (!paused) requestAnimationFrame(render);
+}
+
+// Set up button/s to control pause/unpause, etc.
+```
+
+Some important CSS:
+
+```css
+#scene-container {
+  width: 100%;
+  height: 100vh;
+  position: absolute;
+  top: 0;
+  z-index: -1;
+}
+```
