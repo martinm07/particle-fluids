@@ -234,15 +234,16 @@ void main() {
                 yPrime = (b2 - b1) / (m1 - m2);
             }
 
-            if (line1.isOfX ^^ line2.isOfX) { // exclusive OR
-                if (m1 * m2 == 1.0) {
-                    continue;
-                }
-            } else {
-                if (m1 == m2) {
-                    continue;
-                }
-            }
+            // if (line1.isOfX ^^ line2.isOfX) { // exclusive OR
+            //     if (m1 * m2 == 1.0) {
+            //         continue;
+            //     }
+            // } else {
+            //     if (m1 == m2) {
+            //         continue;
+            //     }
+            // }
+            if (isnan(xPrime) || isnan(yPrime)) continue;
 
             vec2 prime = vec2(xPrime, yPrime);
             bool shiftedCloser = length(prime - x) < length(newXStar - x);
@@ -255,7 +256,9 @@ void main() {
                                abs(p12Core.x * (x.y        - p1Core.y) - p12Core.y * (x.x        - p1Core.x));
             bool isPointedAt = isBetween || xStarCloser;
 
-            if ((shiftedCloser && isInSpan && isPointedAt && newXStar != x) || xInBox) {
+            // TODO: Without xInBox consideration, leaks do happen but are rare. With it, they become more common
+            //  (perhaps due to adjustment outside of xxStar span?). Further investigation required.
+            if ((shiftedCloser && isInSpan && isPointedAt && newXStar != x)) {// || xInBox) {
                 // intersection is true
                 float distance = length(prime - x);
                 if (numIntersected == 0 || distance < holdingDistance) {
