@@ -74,6 +74,7 @@ export const initMask = (partLength: number, numParts: number) => {
   let sizeX, sizeY;
   [sizeX, sizeY] = getSizeXY(partLength * numParts);
   const mask = [];
+  // TODO: Potential for "too many function arguments" in push splat operator
   for (let i = 1; i <= numParts; i++)
     mask.push(...Array(partLength * 4).fill(i)); // ` * 4` for RGBA
   const data = new Uint8Array(mask);

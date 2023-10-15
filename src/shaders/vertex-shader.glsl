@@ -1,8 +1,18 @@
 attribute vec2 referenceX;
 attribute vec2 referenceY;
+flat varying vec2 vRefX;
+flat varying vec2 vRefY;
 
 uniform sampler2D texturePosition;
+uniform sampler2D textureVelocity;
 uniform float pixelScale;
+uniform float size;
+uniform vec2 offset;
+
+uniform vec2 iMouse;
+uniform float iTime;
+
+#include <clipping_planes_pars_vertex>
 
 // As it turns out, since WebGL 2.0 (which is based on OpenGL ES 3.0, as opposed to OpenGL ES 2.0),
 //  there is already a function that does this, namely "uintBitsToFloat", and the reverse ("floatBitsToUint").
@@ -47,14 +57,36 @@ float interpretBytesVector(vec4 bytes) {
     return uintBitsToFloat(combined);
 }
 
+float sizeFunc() { /* will be automatically filled in */ }
+
+vec2 pos; vec2 vel;
 void main() {
+    // #include <begin_vertex>
+
+    bool isSizeDynamic; // automatically assigned
+
+    vRefX = referenceX;
+    vRefY = referenceY;
     vec4 posXBytes = texture2D(texturePosition, referenceX).xyzw;
     vec4 posYBytes = texture2D(texturePosition, referenceY).xyzw;
 
     float xPos = interpretBytesVector(posXBytes);
     float yPos = interpretBytesVector(posYBytes);
+    pos = vec2(xPos, yPos);
 
-    vec3 newPosition = position;
-    newPosition += vec3(xPos * pixelScale, yPos * pixelScale, 0.0);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
+    float xVel = interpretBytesVector(texture2D(textureVelocity, referenceX).xyzw);
+    float yVel = interpretBytesVector(texture2D(textureVelocity, referenceY).xyzw);
+    vel = vec2(xVel, yVel);
+
+    float size_;
+    if (isSizeDynamic) size_ = sizeFunc();
+    else size_ = size;
+    
+    vec3 newPosition = size_ * position;
+    newPosition += vec3((pos + offset) * pixelScale, 0.0);
+
+    // #include <project_vertex>
+    vec4 mvPosition = modelViewMatrix * vec4(newPosition, 1.0 );
+    gl_Position = projectionMatrix * mvPosition;
+    #include <clipping_planes_vertex>
 }

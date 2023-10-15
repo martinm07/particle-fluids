@@ -52,16 +52,16 @@ export class SimParams {
     this.GRIDSIZE = params.GRIDSIZE ?? 1;
     this.BOUNDARY_MARGIN = params.BOUNDARY_MARGIN ?? 0.5;
     this.KERNEL_WIDTH = params.KERNEL_WIDTH ?? 1.32;
-    this.GRAVITY = params.GRAVITY ?? 250;
-    this.REST_DENSITY = params.REST_DENSITY ?? 0.52;
-    this.CONSTRAINT_RELAXATION = params.CONSTRAINT_RELAXATION ?? 5;
-    this.ARTIFICIAL_PRESSURE_SCALE = params.ARTIFICIAL_PRESSURE_SCALE ?? 0.069;
+    this.GRAVITY = params.GRAVITY ?? 125;
+    this.REST_DENSITY = params.REST_DENSITY ?? 0.877;
+    this.CONSTRAINT_RELAXATION = params.CONSTRAINT_RELAXATION ?? 3.2;
+    this.ARTIFICIAL_PRESSURE_SCALE = params.ARTIFICIAL_PRESSURE_SCALE ?? 0.1;
     this.ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE =
       params.ARTIFICIAL_PRESSURE_FIXED_KERNEL_DISTANCE ??
       0.07 * this.KERNEL_WIDTH;
-    this.ARTIFICIAL_PRESSURE_POWER = params.ARTIFICIAL_PRESSURE_POWER ?? 4;
-    this.VORTICITY_COEFFICIENT = params.VORTICITY_COEFFICIENT ?? 1;
-    this.VISCOSITY_COEFFICIENT = params.VISCOSITY_COEFFICIENT ?? 0.4;
+    this.ARTIFICIAL_PRESSURE_POWER = params.ARTIFICIAL_PRESSURE_POWER ?? 2;
+    this.VORTICITY_COEFFICIENT = params.VORTICITY_COEFFICIENT ?? 0.4;
+    this.VISCOSITY_COEFFICIENT = params.VISCOSITY_COEFFICIENT ?? 0.3;
   }
 }
 type GridMap = Map<string, number[]>;
@@ -70,6 +70,7 @@ export class Algorithm {
   last: number = -1;
   params: SimParams;
   positions?: THREE.Texture;
+  initPositions?: () => THREE.Texture;
   velocities?: THREE.Texture;
   protected xStarBytes?: Uint8Array;
   protected xStar?: Float32Array;
@@ -117,10 +118,47 @@ export class Algorithm {
     this.renderer = renderer;
   }
 
-  init(nParticles: number, maxNeighbours: number, lineBounds: number[][] = []) {
+  init(
+    nParticles: number,
+    maxNeighbours: number,
+    lineBounds: number[][] = [],
+    initPositions: (
+      i: number
+    ) => [x: number, y: number] | number[] | Float32Array | THREE.Texture
+  ) {
     this.P_ = 2 * nParticles;
     this.MAX_NEIGHBOURS_ = maxNeighbours;
     this.N_ = 2 * nParticles * maxNeighbours;
+
+    if (
+      ((
+        value: typeof initPositions
+      ): value is (i: number) => [x: number, y: number] =>
+        typeof value === "function")(initPositions)
+    )
+      this.initPositions = () => {
+        const texture = initTexture(this.P);
+        texture.needsUpdate = true;
+        const theArray = texture.image.data;
+        for (let i = 0; i < nParticles; i++) {
+          const pos = initPositions(i);
+          theArray.set(floatToBytesArray(pos[0]), i * 2 * 4);
+          theArray.set(floatToBytesArray(pos[1]), (i * 2 + 1) * 4);
+        }
+        return texture;
+      };
+    else if (
+      initPositions instanceof Float32Array ||
+      Array.isArray(initPositions)
+    )
+      this.initPositions = () => {
+        const texture = initTexture(this.P);
+        texture.needsUpdate = true;
+        texture.image.data.set(initPositions);
+        return texture;
+      };
+    else if (initPositions instanceof THREE.Texture)
+      this.initPositions = () => initPositions;
 
     this.initCreateInputs();
     const lineBounds_ = lineBounds.flat();
@@ -272,25 +310,25 @@ export class Algorithm {
 
     this.initSetInputs();
   }
-  initPositions(): THREE.DataTexture {
-    const texture = initTexture(this.P);
-    texture.needsUpdate = true;
-    const theArray = texture.image.data;
-    for (let i = 0, il = theArray.length; i < il / 4; i++) {
-      let num: number;
-      if (i % 2 === 0) {
-        // x coordinate
-        num = (i % 30) * 0.5 - 7.5;
-      } else {
-        // y coordinate
-        num = Math.floor(i / 30) * 1;
-      }
-      theArray.set(floatToBytesArray(num), i * 4);
-    }
-    return texture;
-  }
+  // initPositions(): THREE.DataTexture {
+  //   const texture = initTexture(this.P);
+  //   texture.needsUpdate = true;
+  //   const theArray = texture.image.data;
+  //   for (let i = 0, il = theArray.length; i < il / 4; i++) {
+  //     let num: number;
+  //     if (i % 2 === 0) {
+  //       // x coordinate
+  //       num = (i % 30) * 0.5 - 7.5;
+  //     } else {
+  //       // y coordinate
+  //       num = Math.floor(i / 30) * 1;
+  //     }
+  //     theArray.set(floatToBytesArray(num), i * 4);
+  //   }
+  //   return texture;
+  // }
   initCreateInputs() {
-    this.positions = this.initPositions();
+    this.positions = this.initPositions!();
     this.velocities = initTexture(this.P);
 
     this.xStarBytes = new Uint8Array(this.P * 4);

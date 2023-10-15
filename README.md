@@ -2,16 +2,23 @@
 
 Implementing "Position Based Fluids" by M. Macklin et al. using Three.js for GPGPU.
 
-There are currently two exposed classes: `ParticleRender` and `Algorithm`. This package is not yet ready for real use. Please check back again in the near future.
+This package is not yet ready for real use. Please check back again in the near future.
 
-![Blue fluid particles splashing after fall](src/img/fluid-splash.png)
+# Installation
 
-![Blue fluid particles in a mostly resting state](src/img/fluid-still.png)
+```
+npm i particle-fluids
+```
 
 ### Example
 
 ```typescript
-import { Algorithm, ParticleRender } from "particle-fluids";
+import {
+  Algorithm,
+  ParticleRender,
+  DefaultCanvas,
+  BlueCircleParticle,
+} from "particle-fluids";
 
 const MAX_NEIGHBOURS = 64;
 const N_PARTICLES = 128;
@@ -26,11 +33,18 @@ const lineBounds = [
   [-20, 200, 20, 200],
 ];
 
-const particleRenderer = new ParticleRender(container, N_PARTICLES);
+const particleRenderer = new ParticleRender(
+  container,
+  N_PARTICLES,
+  BlueCircleParticle,
+  DefaultCanvas
+);
 const sim = new Algorithm(particleRenderer.renderer, { SOLVER_ITERATIONS: 3 });
-sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds);
+sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds, (i) => {
+  return [(i % 10) - 5, Math.floor(i / 10)];
+});
 
-particleRenderer.setParticlePositions(sim.positions!);
+particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
 particleRenderer.render();
 
 let debug = false;
@@ -39,7 +53,7 @@ function render() {
   sim.debug = debug;
   sim.step(paused ? 0.0166 : undefined);
 
-  particleRenderer.setParticlePositions(sim.positions!);
+  particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
   particleRenderer.render();
 
   debug = false;

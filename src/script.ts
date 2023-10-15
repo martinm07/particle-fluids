@@ -5,6 +5,9 @@ import { isLittleEndianness, formatNumber } from "./helper";
 import { Algorithm } from "./Algorithm";
 import { ParticleRender } from "./ParticleRender";
 import { test } from "./__tests__/Algorithm.test";
+import { ParticleVisual } from "./visuals/ParticleVisuals";
+import { BoundingBox, CanvasVisual, aColor } from "./visuals/CanvasVisuals";
+import { CircleShape } from "./visuals/ParticleGeometry";
 
 const MAX_NEIGHBOURS = 64;
 // There is an issue with non-power-of-2 values here- quite mysterious
@@ -138,16 +141,43 @@ declare the varyings.
 // #endregion
 
 // order: x1, y1, x2, y2
+const lWall = -10;
+const rWall = 10;
+const tWall = 200;
+const bWall = -20;
 const lineBounds = [
-  [-20, -20, 20, -20],
-  [-20, -20, -20, 200],
-  [20, -20, 20, 200],
-  [-20, 200, 20, 200],
+  [lWall, bWall, rWall, bWall],
+  [lWall, bWall, lWall, tWall],
+  [rWall, bWall, rWall, tWall],
+  [lWall, tWall, rWall, tWall],
 ];
 
-const particleRenderer = new ParticleRender(container, N_PARTICLES);
+// #ededed
+const particleVisual: ParticleVisual = {
+  color: new THREE.Color(0xededed),
+  size: 1,
+  shape: new CircleShape(),
+};
+const canvasVisual: CanvasVisual = {
+  backgroundColor: new aColor(0xffffff, 1),
+  pixelScale: 4,
+  translate: [0, 4],
+  copies: 1,
+  rotation: 0,
+  flipped: [false, false],
+  crop: new BoundingBox(NaN, NaN, 20, NaN),
+  framesBetween: 0,
+};
 
-const PIXEL_SCALE = particleRenderer.params.PIXEL_SCALE;
+const particleRenderer = new ParticleRender(
+  container,
+  N_PARTICLES,
+  particleVisual,
+  canvasVisual
+);
+
+const PIXEL_SCALE = canvasVisual.pixelScale * particleRenderer.params.SCALE;
+// const PIXEL_SCALE = particleRenderer.params.SCALE;
 const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
 const linePoints = [];
 linePoints.push(new THREE.Vector3(-20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
@@ -156,12 +186,15 @@ linePoints.push(new THREE.Vector3(20 * PIXEL_SCALE, -20 * PIXEL_SCALE, 0));
 linePoints.push(new THREE.Vector3(20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
 const linesGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
 const line = new THREE.Line(linesGeometry, lineMaterial);
-particleRenderer.scene.add(line);
+console.log(line);
+// particleRenderer.scene.add(line);
 
 const sim = new Algorithm(particleRenderer.renderer, { SOLVER_ITERATIONS: 3 });
-sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds);
+sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds, (i) => {
+  return [(i % 10) - 5, Math.floor(i / 10)];
+});
 // sim.step(0.0166);
-particleRenderer.setParticlePositions(sim.positions!);
+particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
 particleRenderer.render();
 
 let debug = false;
@@ -170,7 +203,7 @@ function render() {
   sim.debug = debug;
   sim.step(paused ? 0.0166 : undefined);
 
-  particleRenderer.setParticlePositions(sim.positions!);
+  particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
   particleRenderer.render();
 
   debug = false;
@@ -198,8 +231,10 @@ startStopBtn.addEventListener("click", () => {
   else requestAnimationFrame(render);
 });
 resetBtn.addEventListener("click", () => {
-  sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds);
-  particleRenderer.setParticlePositions(sim.positions!);
+  sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds, (i) => {
+    return [(i % 10) - 5, Math.floor(i / 10)];
+  });
+  particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
   particleRenderer.render();
 });
 testBtn.addEventListener("click", () => {
@@ -240,3 +275,9 @@ const params: [string, string, number[]][] = [
 params.forEach(([paramName, glslName, depends]) =>
   makeParameterSlider(paramName, glslName, depends)
 );
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "n") {
+    requestAnimationFrame(render);
+  }
+});
