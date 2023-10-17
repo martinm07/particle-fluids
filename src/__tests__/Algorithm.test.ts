@@ -56,3 +56,15 @@ export function test() {
 
 const env = new ShaderTestEnv(64, 50);
 console.log(`P: ${env.P}, N: ${env.N}`);
+
+export function initAlg(
+  algorithm: Algorithm,
+  nParticles: number,
+  maxNeighbours: number,
+  lineBounds?: number[][]
+) {
+  // init positions not really used, can be whatever
+  algorithm.init(nParticles, maxNeighbours, lineBounds ?? [], (i) => {
+    return [(i % 15) - 7.5, Math.floor(i / 15)];
+  });
+}

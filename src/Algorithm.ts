@@ -9,6 +9,7 @@ import assignPositionsCode from "./shaders/assign-positions.glsl";
 
 import { GPUCompute } from "./GPUCompute";
 import {
+  Vec2,
   bytesToFloat,
   floatToBytesArray,
   getSizeXY,
@@ -122,18 +123,14 @@ export class Algorithm {
     nParticles: number,
     maxNeighbours: number,
     lineBounds: number[][] = [],
-    initPositions: (
-      i: number
-    ) => [x: number, y: number] | number[] | Float32Array | THREE.Texture
+    initPositions: (i: number) => Vec2 | number[] | Float32Array | THREE.Texture
   ) {
     this.P_ = 2 * nParticles;
     this.MAX_NEIGHBOURS_ = maxNeighbours;
     this.N_ = 2 * nParticles * maxNeighbours;
 
     if (
-      ((
-        value: typeof initPositions
-      ): value is (i: number) => [x: number, y: number] =>
+      ((value: typeof initPositions): value is (i: number) => Vec2 =>
         typeof value === "function")(initPositions)
     )
       this.initPositions = () => {

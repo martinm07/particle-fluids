@@ -7,7 +7,7 @@ import {
   randIndices,
   texCoords,
 } from "../helper";
-import { ShaderTestEnv, it, TestResult } from "./Algorithm.test";
+import { ShaderTestEnv, it, TestResult, initAlg } from "./Algorithm.test";
 
 export default function testGPUC3(env: ShaderTestEnv) {
   const algorithm = env.algorithm;
@@ -17,7 +17,7 @@ export default function testGPUC3(env: ShaderTestEnv) {
   const N = env.N;
 
   it("should be 0 at the smoothing kernel radius", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[3];
     gpuc.updateUniform("h", 3.14);
 
@@ -41,7 +41,7 @@ export default function testGPUC3(env: ShaderTestEnv) {
   });
 
   it("should be 0 beyond the smoothing kernel radius", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[3];
     gpuc.updateUniform("h", 3.14);
 
@@ -65,7 +65,7 @@ export default function testGPUC3(env: ShaderTestEnv) {
   });
 
   it("should have a maximum value at 0 distance", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[3];
     gpuc.updateUniform("h", 3.14);
 
@@ -92,7 +92,7 @@ export default function testGPUC3(env: ShaderTestEnv) {
   });
 
   it("should have 0 gradient at 0 distance", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[3];
     gpuc.updateUniform("h", 3.14);
 
@@ -117,7 +117,7 @@ export default function testGPUC3(env: ShaderTestEnv) {
   });
 
   it("should be symmetrical around the center", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[3];
     gpuc.updateUniform("h", 3.14);
 
@@ -173,7 +173,7 @@ export default function testGPUC3(env: ShaderTestEnv) {
   it("should behave as expected for various nParticles", () => {
     let result: TestResult = [true];
     for (const nParticles of [64, 28, 30, 25, 400]) {
-      algorithm.init(nParticles, maxNeighbours);
+      initAlg(algorithm, nParticles, maxNeighbours);
       const gpuc = algorithm.gpuComputes[3];
       const h = 3.14;
       gpuc.updateUniform("h", h);

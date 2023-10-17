@@ -3,7 +3,8 @@ import vertexShaderCode from "./shaders/vertex-shader.glsl";
 import fragmentShaderCode from "./shaders/fragment-shader.glsl";
 import { ParticleGeometry } from "./visuals/ParticleGeometry";
 import { ParticleVisual } from "./visuals/ParticleVisuals";
-import { BoundingBox, CanvasVisual } from "./visuals/CanvasVisuals";
+import { CanvasVisual } from "./visuals/CanvasVisuals";
+import { Vec2 } from "./helper";
 
 interface OptParticleRenderParamsSetter {
   FRUSTUM_SIZE?: number;
@@ -151,12 +152,11 @@ export class ParticleRender {
     }
 
     type Flipped = [x: boolean, y: boolean] | [x: boolean, y: boolean][];
-    type Translation = [x: number, y: number] | [x: number, y: number][];
+    type Translation = Vec2 | Vec2[];
     const isOneFlipVal = (value: Flipped): value is [x: boolean, y: boolean] =>
       typeof value[0] === "boolean";
-    const isOneTransVal = (
-      value: Translation
-    ): value is [x: number, y: number] => typeof value[0] === "number";
+    const isOneTransVal = (value: Translation): value is Vec2 =>
+      typeof value[0] === "number";
 
     this.copies = canvasVisual.copies;
     for (let i = 0; i < this.copies; i++) {
@@ -175,43 +175,16 @@ export class ParticleRender {
         flippedY = canvasVisual.flipped[i][1];
       }
 
-      let translation: [x: number, y: number];
+      let translation: Vec2;
       if (isOneTransVal(canvasVisual.translate))
         translation = canvasVisual.translate;
       else translation = canvasVisual.translate[i];
-
-      const scale = canvasVisual.pixelScale * this.params.SCALE;
-      let clippingPlanes: THREE.Plane[] = [];
-      if (canvasVisual.crop) {
-        let crop;
-        if (canvasVisual.crop instanceof BoundingBox) crop = canvasVisual.crop;
-        else crop = canvasVisual.crop[i];
-
-        if (!Number.isNaN(crop.left) && crop.left != null)
-          clippingPlanes.push(
-            new THREE.Plane(new THREE.Vector3(1, 0, 0), crop.left * scale)
-          );
-        if (!Number.isNaN(crop.right) && crop.right != null)
-          clippingPlanes.push(
-            new THREE.Plane(new THREE.Vector3(-1, 0, 0), crop.right * scale)
-          );
-        if (!Number.isNaN(crop.bottom) && crop.bottom != null)
-          clippingPlanes.push(
-            new THREE.Plane(new THREE.Vector3(0, 1, 0), crop.bottom * scale)
-          );
-        if (!Number.isNaN(crop.top) && crop.top != null)
-          clippingPlanes.push(
-            new THREE.Plane(new THREE.Vector3(0, -1, 0), crop.top * scale)
-          );
-      }
 
       const material = new THREE.ShaderMaterial({
         uniforms: { ...this.particleUniforms, offset: { value: translation } },
         vertexShader: shaderCode.vertex,
         fragmentShader: shaderCode.fragment,
         side: THREE.DoubleSide,
-        // left wall, positive pushes leftwards, negative rightwards
-        clippingPlanes,
         clipping: true,
       });
 

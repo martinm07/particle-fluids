@@ -307,3 +307,5 @@ function sfc32(a: number, b: number, c: number, d: number) {
 const seed = cyrb128("apples");
 const rng = sfc32(...seed);
 export { rng };
+
+export type Vec2 = [x: number, y: number];

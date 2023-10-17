@@ -6,7 +6,7 @@ import {
   fillBytesTexture,
   getSizeXY,
 } from "../helper";
-import { it, ShaderTestEnv, TestResult } from "./Algorithm.test";
+import { initAlg, it, ShaderTestEnv, TestResult } from "./Algorithm.test";
 
 export default function testGPUC1(env: ShaderTestEnv) {
   const algorithm = env.algorithm;
@@ -15,7 +15,7 @@ export default function testGPUC1(env: ShaderTestEnv) {
   const P = env.P;
 
   it("should not change positions nor velocities in 0 delta time", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
 
     const gpuc = algorithm.gpuComputes[1];
     gpuc.updateUniform("deltaT", 0);
@@ -36,7 +36,7 @@ export default function testGPUC1(env: ShaderTestEnv) {
   });
 
   it("should add forces to velocity in 1 delta time", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
 
     const gpuc = algorithm.gpuComputes[1];
     gpuc.updateUniform("deltaT", 1);
@@ -56,7 +56,7 @@ export default function testGPUC1(env: ShaderTestEnv) {
   });
 
   it("should add velocity to position in 1 delta time", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
 
     const gpuc = algorithm.gpuComputes[1];
     gpuc.updateUniform("deltaT", 1);
@@ -79,7 +79,7 @@ export default function testGPUC1(env: ShaderTestEnv) {
   });
 
   it("should add velocity AND forces to position in 1 delta time", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
 
     const gpuc = algorithm.gpuComputes[1];
     gpuc.updateUniform("deltaT", 1);
@@ -105,7 +105,7 @@ export default function testGPUC1(env: ShaderTestEnv) {
   });
 
   it("should behave as expected for various delta times", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[1];
 
     let positionBytes: Uint8Array;
@@ -144,7 +144,7 @@ export default function testGPUC1(env: ShaderTestEnv) {
   it("should behave as expected for various nParticles", () => {
     let result: TestResult = [true];
     for (const nParticles of [28, 30, 25, 400]) {
-      algorithm.init(nParticles, maxNeighbours);
+      initAlg(algorithm, nParticles, maxNeighbours);
       const gpuc = algorithm.gpuComputes[1];
 
       gpuc.updateUniform("deltaT", 0.5);

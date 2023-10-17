@@ -7,9 +7,9 @@ import {
   getSizeXY,
   randIndices,
 } from "../helper";
-import { ShaderTestEnv, it, TestResult } from "./Algorithm.test";
+import { ShaderTestEnv, it, TestResult, initAlg } from "./Algorithm.test";
 
-const TOL = 0.00001;
+const TOL = Number.parseFloat(import.meta.env.VITE_TOL) / 10;
 
 export default function testGPUC6(env: ShaderTestEnv) {
   const algorithm = env.algorithm;
@@ -19,7 +19,7 @@ export default function testGPUC6(env: ShaderTestEnv) {
   const N = env.N;
 
   it("should be 0 for x* = x", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[6];
 
     [gpuc.texInputs.X] = fillBytesTexture(...getSizeXY(P), 2);
@@ -37,7 +37,7 @@ export default function testGPUC6(env: ShaderTestEnv) {
   });
 
   it("should be x* - x in 1 deltaTime and no vorticity/viscosity", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[6];
     gpuc.updateUniform("vorticityCoefficient", 0);
     gpuc.updateUniform("viscosityCoefficient", 0);
@@ -59,7 +59,7 @@ export default function testGPUC6(env: ShaderTestEnv) {
   });
 
   it("should have viscosity be a sum of kernel values for vij = 1", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[6];
     gpuc.updateUniform("vorticityCoefficient", 0);
     gpuc.updateUniform("viscosityCoefficient", 1);
@@ -121,7 +121,7 @@ export default function testGPUC6(env: ShaderTestEnv) {
   });
 
   it("should have vorticity 0 for ∇W 0", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[6];
     gpuc.updateUniform("vorticityCoefficient", 1);
     gpuc.updateUniform("viscosityCoefficient", 0);
@@ -168,7 +168,7 @@ export default function testGPUC6(env: ShaderTestEnv) {
   it("should behave as expected for various nParticles", () => {
     let result: TestResult = [true];
     for (const nParticles of [64, 28, 30, 25, 400]) {
-      algorithm.init(nParticles, maxNeighbours);
+      initAlg(algorithm, nParticles, maxNeighbours);
       const gpuc = algorithm.gpuComputes[6];
       const vorticityCoef = 3.3;
       gpuc.updateUniform("vorticityCoefficient", vorticityCoef);

@@ -9,7 +9,7 @@ import {
   texCoords,
   rng,
 } from "../helper";
-import { ShaderTestEnv, it, TestResult } from "./Algorithm.test";
+import { ShaderTestEnv, it, TestResult, initAlg } from "./Algorithm.test";
 import lineBoundsTests from "./lineBoundsTests.json" assert { type: "json" };
 
 export default function testGPUC5(env: ShaderTestEnv) {
@@ -20,7 +20,7 @@ export default function testGPUC5(env: ShaderTestEnv) {
   const N = env.N;
 
   it("should have Δp 0 for 0 neighbours", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[5];
 
     let xStarAndVelocityBytes;
@@ -40,7 +40,7 @@ export default function testGPUC5(env: ShaderTestEnv) {
   });
 
   it("should have a particle's lambda show up j times in its Δp and once in its j neighbours' Δp s", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[5];
     gpuc.updateUniform("restDensity", 1);
 
@@ -86,7 +86,7 @@ export default function testGPUC5(env: ShaderTestEnv) {
   });
 
   it("should be a summation of ∇W s under constant lambda and sCorr", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[5];
     gpuc.updateUniform("restDensity", 1);
 
@@ -131,7 +131,7 @@ export default function testGPUC5(env: ShaderTestEnv) {
   });
 
   it("should return 1/p0 * sCorr for lambda 0", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[5];
     gpuc.updateUniform("restDensity", 1.32);
 
@@ -155,7 +155,7 @@ export default function testGPUC5(env: ShaderTestEnv) {
     let result: TestResult = [true];
     let msg = "";
     for (const { lineBounds, x, xStar, expected } of lineBoundsTests) {
-      algorithm.init(nParticles, maxNeighbours, lineBounds);
+      initAlg(algorithm, nParticles, maxNeighbours, lineBounds);
       let gpuc = algorithm.gpuComputes[5];
       // "boundaryMargin": When a particle intersects, it will stop at exactly this distance
       //  away from the boundary.
@@ -191,7 +191,7 @@ export default function testGPUC5(env: ShaderTestEnv) {
     let result: TestResult = [true];
     for (const nParticles of [64, 28, 30, 25, 400]) {
       const lineBounds = [[-100, -4, 100, -4]];
-      algorithm.init(nParticles, maxNeighbours, lineBounds);
+      initAlg(algorithm, nParticles, maxNeighbours, lineBounds);
       const gpuc = algorithm.gpuComputes[5];
       gpuc.updateUniform("boundaryMargin", 0);
 

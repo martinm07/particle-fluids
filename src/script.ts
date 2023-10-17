@@ -6,7 +6,7 @@ import { Algorithm } from "./Algorithm";
 import { ParticleRender } from "./ParticleRender";
 import { test } from "./__tests__/Algorithm.test";
 import { ParticleVisual } from "./visuals/ParticleVisuals";
-import { BoundingBox, CanvasVisual, aColor } from "./visuals/CanvasVisuals";
+import { CanvasVisual, aColor } from "./visuals/CanvasVisuals";
 import { CircleShape } from "./visuals/ParticleGeometry";
 
 const MAX_NEIGHBOURS = 64;
@@ -165,7 +165,6 @@ const canvasVisual: CanvasVisual = {
   copies: 1,
   rotation: 0,
   flipped: [false, false],
-  crop: new BoundingBox(NaN, NaN, 20, NaN),
   framesBetween: 0,
 };
 

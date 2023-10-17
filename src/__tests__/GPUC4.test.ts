@@ -7,7 +7,7 @@ import {
   getSizeXY,
   texCoords,
 } from "../helper";
-import { ShaderTestEnv, it, TestResult } from "./Algorithm.test";
+import { ShaderTestEnv, it, TestResult, initAlg } from "./Algorithm.test";
 
 export default function testGPUC4(env: ShaderTestEnv) {
   const algorithm = env.algorithm;
@@ -17,7 +17,7 @@ export default function testGPUC4(env: ShaderTestEnv) {
   const N = env.N;
 
   it("should have lambda 0 when particles are at rest density", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[4];
 
     const gpuc3Vals = new Float32Array((N / 4) * 3);
@@ -37,7 +37,7 @@ export default function testGPUC4(env: ShaderTestEnv) {
   });
 
   it("should have lambda 1 / ε when particles have 0 neighbours", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[4];
 
     gpuc.updateUniform("constraintRelaxation", 1.73);
@@ -46,7 +46,7 @@ export default function testGPUC4(env: ShaderTestEnv) {
   });
 
   it("should have lambda 1 / ε when particles have 0 close neighbours", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[4];
 
     gpuc.updateUniform("constraintRelaxation", 1.73);
@@ -63,7 +63,7 @@ export default function testGPUC4(env: ShaderTestEnv) {
   });
 
   it("should have expected lambda for a GPUC3 texture of all 1s", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[4];
     gpuc.updateUniform("restDensity", 1);
     gpuc.updateUniform("constraintRelaxation", 0);
@@ -86,7 +86,7 @@ export default function testGPUC4(env: ShaderTestEnv) {
   });
 
   it("should have sCorr be -W(pi - pj) under the select parameter values", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[4];
 
     let gpuc3Bytes: Uint8Array;
@@ -123,7 +123,7 @@ export default function testGPUC4(env: ShaderTestEnv) {
   });
 
   it("should have expected sCorr", () => {
-    algorithm.init(nParticles, maxNeighbours);
+    initAlg(algorithm, nParticles, maxNeighbours);
     const gpuc = algorithm.gpuComputes[4];
 
     let gpuc3Bytes: Uint8Array;
@@ -170,7 +170,7 @@ export default function testGPUC4(env: ShaderTestEnv) {
   it("should behave as expected for various nParticles", () => {
     let result: TestResult = [true];
     for (const nParticles of [64, 28, 30, 25, 400]) {
-      algorithm.init(nParticles, maxNeighbours);
+      initAlg(algorithm, nParticles, maxNeighbours);
       const gpuc = algorithm.gpuComputes[4];
 
       const P = nParticles * 2;

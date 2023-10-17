@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { Vec2 } from "../helper";
 
 export class aColor {
   color: THREE.Color;
@@ -23,30 +24,6 @@ export class aColor {
   }
 }
 
-type Vec2 = [x: number, y: number];
-export class BoundingBox {
-  top?: number;
-  right?: number;
-  bottom?: number;
-  left?: number;
-
-  constructor(p1: Vec2, p2: Vec2);
-  constructor(p1: number, p2: number, p3: number, p4: number);
-  constructor(p1: number | Vec2, p2: number | Vec2, p3?: number, p4?: number) {
-    if (typeof p1 === "number") {
-      this.top = p1;
-      if (typeof p2 === "number") this.right = p2;
-      this.bottom = p3!;
-      this.left = p4!;
-    } else if (typeof p2 !== "number") {
-      this.left = Math.min(p1[0], p2[0]);
-      this.right = Math.max(p1[0], p2[0]);
-      this.bottom = Math.min(p1[1], p2[1]);
-      this.top = Math.max(p1[1], p2[1]);
-    }
-  }
-}
-
 export interface CanvasVisual {
   backgroundColor: aColor;
   pixelScale: number;
@@ -54,7 +31,6 @@ export interface CanvasVisual {
   translate: Vec2 | Vec2[];
   rotation: number | number[];
   flipped: [x: boolean, y: boolean] | [x: boolean, y: boolean][];
-  crop?: BoundingBox | BoundingBox[];
   framesBetween: number;
 }
 
@@ -65,7 +41,6 @@ export const DefaultCanvas: CanvasVisual = {
   copies: 1,
   rotation: 0,
   flipped: [false, false],
-  crop: new BoundingBox(NaN, NaN, 20, NaN),
   framesBetween: 0,
 };
 
