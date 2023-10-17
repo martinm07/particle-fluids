@@ -177,7 +177,6 @@ const particleRenderer = new ParticleRender(
 );
 
 const PIXEL_SCALE = canvasVisual.pixelScale * particleRenderer.params.SCALE;
-// const PIXEL_SCALE = particleRenderer.params.SCALE;
 const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
 const linePoints = [];
 linePoints.push(new THREE.Vector3(-20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
@@ -193,22 +192,26 @@ const sim = new Algorithm(particleRenderer.renderer, { SOLVER_ITERATIONS: 3 });
 sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds, (i) => {
   return [(i % 10) - 5, Math.floor(i / 10)];
 });
-// sim.step(0.0166);
 particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
 particleRenderer.render();
 
 let debug = false;
 let paused = true;
+let frame = false;
 function render() {
   sim.debug = debug;
-  sim.step(paused ? 0.0166 : undefined);
 
-  particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
+  if (frame || !paused) {
+    sim.step(paused ? 0.0166 : undefined);
+    particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
+  }
   particleRenderer.render();
 
+  frame = false;
   debug = false;
-  if (!paused) requestAnimationFrame(render);
+  requestAnimationFrame(render);
 }
+requestAnimationFrame(render);
 
 ////////////////////// SIMULATION CONTROLS
 
@@ -218,17 +221,16 @@ const resetBtn = document.querySelector("#reset")!;
 const debugBtn = document.querySelector("#debug")!;
 const testBtn = document.querySelector("#test")!;
 nextFrameBtn.addEventListener("click", () => {
-  requestAnimationFrame(render);
+  frame = true;
 });
 debugBtn.addEventListener("click", () => {
   debug = true;
-  requestAnimationFrame(render);
+  frame = true;
 });
 startStopBtn.addEventListener("click", () => {
   paused = !paused;
   nextFrameBtn.disabled = !paused;
   if (paused) sim.pause();
-  else requestAnimationFrame(render);
 });
 resetBtn.addEventListener("click", () => {
   sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds, (i) => {

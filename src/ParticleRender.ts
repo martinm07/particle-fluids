@@ -98,10 +98,8 @@ export class ParticleRender {
     this.renderer.localClippingEnabled = true;
     const width = canvasContainer.clientWidth;
     const height = canvasContainer.clientHeight;
-    // console.log(width, height);
 
     this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setSize(width, height);
 
     this.renderer.setClearColor(
       canvasVisual.backgroundColor.color,
@@ -234,6 +232,29 @@ export class ParticleRender {
       this.meshes.push(particleMesh);
       this.scene.add(particleMesh);
     }
+
+    canvas.style.removeProperty("height");
+    canvas.style.removeProperty("width");
+  }
+
+  // https://stackoverflow.com/a/45046955/11493659
+  updateSize() {
+    const canvas = this.renderer.domElement;
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    if (canvas.width !== width || canvas.height !== height) {
+      // "false" here means that THREE.js doesn't override the canvas'
+      //  width and height styles (only changes attributes) which is needed
+      //  for using canvas.clientWidth/Height
+      this.renderer.setSize(width, height, false);
+
+      const aspect = width / height;
+      this.camera.left = (this.params.FRUSTUM_SIZE * aspect) / -2;
+      this.camera.right = (this.params.FRUSTUM_SIZE * aspect) / 2;
+      this.camera.top = this.params.FRUSTUM_SIZE / 2;
+      this.camera.bottom = this.params.FRUSTUM_SIZE / -2;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   setParticleStates(positions: THREE.Texture, velocities: THREE.Texture) {
@@ -242,6 +263,8 @@ export class ParticleRender {
   }
 
   render() {
+    this.updateSize();
+
     const rect = this.renderer.domElement.getBoundingClientRect();
     if (mousePresent)
       this.particleUniforms["iMouse"].value = [
