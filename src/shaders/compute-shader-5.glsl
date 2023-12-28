@@ -18,6 +18,10 @@ uniform float boundaryMargin;
 
 uniform float NUL;
 uniform float[LINESLISTLEN] lineBounds;
+uniform sampler2D SDF;
+uniform vec2 SDFtranslate;
+uniform vec2 SDFscale;
+
 uniform sampler2D GPUC5_Mask;
 uniform sampler2D GPUC3_Out;
 uniform sampler2D GPUC4_Out;
@@ -165,58 +169,6 @@ void main() {
             vec2 p12Core = p12;
             p12 = p1 - p2;
 
-            // Determine if we're perhaps gonna intersect with the side between p12 and the boundaryMargin line
-            // See: https://www.desmos.com/geometry/xhl80mgmuh for visuals and logic explanation.
-
-            bool xCloserP1 = abs(dot(p1 - x, p12)) < abs(dot(p2 - x, p12));
-            bool xInSpan = dot(p1 - x, p12) * dot(p2 - x, p12) <= 0.0;
-            bool xPastMargin = dot(x - p1, normal) <= 0.0;
-
-            float xProximity = dot(x - p1Core, normal);
-            bool xInMarginHalfStreet = xProximity > 0.0 && xProximity < boundaryMargin;
-            bool xInBox = xInMarginHalfStreet && xInSpan;
-            
-            bool isSideIntersecting = false;
-            if (xPastMargin && !xInSpan) {
-                isSideIntersecting = true;
-            } else if ((!xPastMargin && !xInSpan) || xInBox) {
-                // This is related to trying to find the acute angle between our two lines.
-                //  See the method explained here: https://www.desmos.com/geometry/zoifeitjev
-                float A = abs(dot(p12, x - newXStar) / length(p12));
-                float H = length(x - newXStar);
-                float O = sqrt(pow(H, 2.0) - pow(A, 2.0));
-
-                vec2 c;
-                if (xCloserP1) {
-                    c = p1;
-                } else {
-                    c = p2;
-                }
-                float parProx = abs(dot(x - c, normal));
-                float perpProx = abs(dot(x - c, p12 / length(p12)));
-                // if A = 0, then p12 and xxStar are perpendicular, outside the span they're never gonna intersect anyways.
-                // if perpProx is the tiniest bit outside the span (resulting in unstable/infinite fraction),
-                //  then it (should be) impossible to ever intersect with the side, which matches up with the condition failing.
-                // if both A and perpProx are tiny/0, then it may arbitrarily decide between being a side intersection or not.
-                //  if it chooses side, then x' will probably be something ridiculous and the point is allowed to sidle by, next
-                //  to the perpendicular boundary. If it chooses not side, then probably the same thing will happen because of
-                //  the isInSpan check, but may be stopped at the corner. All these cases of behaviour are fine.
-                if ((O / A > parProx / perpProx && !xInBox) ||
-                    (O / A < parProx / perpProx &&  xInBox)) {
-                    isSideIntersecting = true;
-                }
-            }
-
-            if (isSideIntersecting) {
-                if (xCloserP1) {
-                    p1 = p1Core + boundaryMargin * normal;
-                    p2 = p1Core - boundaryMargin * normal;
-                } else {
-                    p1 = p2Core - boundaryMargin * normal;
-                    p2 = p2Core + boundaryMargin * normal;
-                }
-            }
-
             LineInfo line2 = lineFromPoints(p1, p2);
             float m2 = line2.m; float b2 = line2.b;
             
@@ -234,15 +186,6 @@ void main() {
                 yPrime = (b2 - b1) / (m1 - m2);
             }
 
-            // if (line1.isOfX ^^ line2.isOfX) { // exclusive OR
-            //     if (m1 * m2 == 1.0) {
-            //         continue;
-            //     }
-            // } else {
-            //     if (m1 == m2) {
-            //         continue;
-            //     }
-            // }
             if (isnan(xPrime) || isnan(yPrime)) continue;
 
             vec2 prime = vec2(xPrime, yPrime);
@@ -256,9 +199,7 @@ void main() {
                                abs(p12Core.x * (x.y        - p1Core.y) - p12Core.y * (x.x        - p1Core.x));
             bool isPointedAt = isBetween || xStarCloser;
 
-            // TODO: Without xInBox consideration, leaks do happen but are rare. With it, they become more common
-            //  (perhaps due to adjustment outside of xxStar span?). Further investigation required.
-            if ((shiftedCloser && isInSpan && isPointedAt && newXStar != x)) {// || xInBox) {
+            if ((shiftedCloser && isInSpan && isPointedAt && newXStar != x)) {
                 // intersection is true
                 float distance = length(prime - x);
                 if (numIntersected == 0 || distance < holdingDistance) {
