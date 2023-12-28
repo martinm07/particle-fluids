@@ -51,6 +51,11 @@ const gpuComputeConstructerIsVarying = (
   return "itemSize" in input;
 };
 
+interface GPUComputeOptions {
+  format?: THREE.PixelFormat;
+  type?: THREE.TextureDataType;
+}
+
 export class GPUCompute {
   length: number;
   sizeX: number;
@@ -64,28 +69,36 @@ export class GPUCompute {
   varInputs: GPUComputeVarInputs;
   texInputs: GPUComputeTexInputs;
   renderer: THREE.WebGLRenderer;
+  format: THREE.PixelFormat = THREE.RGBAFormat;
+  type: THREE.TextureDataType = THREE.UnsignedByteType;
 
   constructor(
-    numComputes: number,
+    numComputes: number | [width: number, height: number],
     computeShader: string,
     renderer: THREE.WebGLRenderer,
-    inputs: Array<GPUComputeConstructTexture | GPUComputeConstructVarying>
+    inputs: Array<GPUComputeConstructTexture | GPUComputeConstructVarying>,
+    options?: GPUComputeOptions
   ) {
-    this.length = numComputes;
+    if (typeof numComputes === "number") {
+      this.length = numComputes;
+      [this.sizeX, this.sizeY] = getSizeXY(numComputes);
+    } else {
+      this.length = numComputes[0] * numComputes[1];
+      [this.sizeX, this.sizeY] = numComputes;
+    }
     this.renderer = renderer;
-    [this.sizeX, this.sizeY] = getSizeXY(numComputes);
 
     const _inputs: Array<GPUComputeInputTexture | GPUComputeInputVarying> = [];
     for (const input of inputs) {
       const _input = Object.assign({}, input);
       if (gpuComputeConstructerIsVarying(_input) && !_input.data) {
-        _input.data = new Float32Array(numComputes * _input.itemSize);
+        _input.data = new Float32Array(this.length * _input.itemSize);
       }
       if (gpuComputeConstructerIsVarying(_input) && !_input.updates) {
         _input.updates = false;
       }
       if (gpuComputeConstructerIsTexture(_input) && !_input.texture) {
-        _input.texture = initTexture(numComputes);
+        _input.texture = initTexture(this.length);
       }
       _inputs.push(_input as GPUComputeInputTexture | GPUComputeInputVarying);
     }
@@ -164,7 +177,7 @@ export class GPUCompute {
     //  which we need to do so that it rasterizes the whole canvas and generate calls to the fragment
     //  shader for every pixel along the canvas' height and width.
     // Here's a diagram that visualises the intent: https://imgur.com/a/rZr9jrh
-    const vertices = new Float32Array((numComputes + 4) * 3);
+    const vertices = new Float32Array((this.length + 4) * 3);
     const X = this.sizeX,
       Y = this.sizeY;
     // Ordering it this way means it reads bottom to top, left to right
@@ -275,7 +288,7 @@ export class GPUCompute {
     let vertexShader = passThruVertexShader;
     for (const input of _inputs)
       if (gpuComputeInputIsVarying(input)) {
-        const data = new Float32Array((numComputes + 4) * input.itemSize);
+        const data = new Float32Array((this.length + 4) * input.itemSize);
         data.set(input.data);
         // Set the varying values of the 4 canvas corner vertices to 0
         const expand = (arr: number[]) =>
@@ -327,6 +340,10 @@ export class GPUCompute {
     this.renderTarget.texture.minFilter = THREE.NearestFilter;
     this.renderTarget.texture.magFilter = THREE.NearestFilter;
     this.renderTarget.texture.needsUpdate = true; // just in case...
+    if (options && options.format) this.format = options.format;
+    this.renderTarget.texture.format = this.format;
+    if (options && options.type) this.type = options.type;
+    this.renderTarget.texture.type = this.type;
 
     this.scene.add(this.mesh);
   }
@@ -354,8 +371,15 @@ export class GPUCompute {
       texture = new THREE.FramebufferTexture(
         this.sizeX,
         this.sizeY,
-        THREE.RGBAFormat
+        this.format
       );
+
+      // "WebGL warning: copyTexSubImage: Implementation bug, please file at
+      //  https://bugzilla.mozilla.org/enter_bug.cgi?product=Core&component=Canvas%A+WebGL!
+      //  ANGLE is particular about CopyTexSubImage formats matching exactly."
+      // This warning has literally 0 hits on Google search
+      texture.type = this.type;
+
       const vector = new THREE.Vector2(0, 0);
       this.renderer.copyFramebufferToTexture(vector, texture);
     }

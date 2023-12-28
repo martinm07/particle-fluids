@@ -57,6 +57,8 @@ export function test() {
 const env = new ShaderTestEnv(64, 50);
 console.log(`P: ${env.P}, N: ${env.N}`);
 
+// TODO: UPDATE TESTS
+
 export function initAlg(
   algorithm: Algorithm,
   nParticles: number,

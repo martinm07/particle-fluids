@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { DataTexture, RGBAFormat, RGFormat, RedFormat, FloatType } from "three";
 import { GPUCompute } from "./GPUCompute";
 import { TestResult } from "./__tests__/Algorithm.test";
@@ -309,3 +310,111 @@ const rng = sfc32(...seed);
 export { rng };
 
 export type Vec2 = [x: number, y: number];
+export type Triangle = [
+  v1x: number,
+  v1y: number,
+  v2x: number,
+  v2y: number,
+  v3x: number,
+  v3y: number
+];
+export type SolidObjs = Triangle[];
+export type Segment = [vix: number, viy: number, vjx: number, vjy: number];
+
+export function trianglesEqual(tri1: Triangle, tri2: Triangle) {
+  if (tri1[0] === tri2[0] && tri1[1] === tri2[1]) {
+    if (tri1[2] === tri2[2] && tri1[3] === tri2[3]) {
+      if (tri1[4] === tri2[4] && tri1[5] === tri2[5]) return true;
+    } else if (tri1[2] === tri2[4] && tri1[3] === tri2[5]) {
+      if (tri1[4] === tri2[2] && tri1[5] === tri2[3]) return true;
+    } else return false;
+  } else if (tri1[0] === tri2[2] && tri1[1] === tri2[3]) {
+    if (tri1[2] === tri2[0] && tri1[3] === tri2[1]) {
+      if (tri1[4] === tri2[4] && tri1[5] === tri2[5]) return true;
+    } else if (tri1[2] === tri2[4] && tri1[3] === tri2[5]) {
+      if (tri1[4] === tri2[0] && tri1[5] === tri2[1]) return true;
+    } else return false;
+  } else if (tri1[0] === tri2[4] && tri1[1] === tri2[5]) {
+    if (tri1[2] === tri2[0] && tri1[3] === tri2[1]) {
+      if (tri1[4] === tri2[2] && tri1[5] === tri2[3]) return true;
+    } else if (tri1[2] === tri2[2] && tri1[3] === tri2[3]) {
+      if (tri1[4] === tri2[0] && tri1[5] === tri2[1]) return true;
+    } else return false;
+  } else return false;
+}
+
+export function visualiseTexture(
+  canvasContainer: HTMLElement,
+  generateTex: (renderer: THREE.WebGLRenderer) => THREE.Texture,
+  shader: string,
+  dims: [width: number, height: number]
+) {
+  const sizeX = dims[0];
+  const sizeY = dims[1];
+
+  const renderer = new THREE.WebGLRenderer();
+  canvasContainer.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera();
+  camera.position.z = 1;
+  scene.add(camera);
+
+  const matUniforms: { [key: string]: { value: any } } = {
+    SDF: { value: null },
+  };
+  const material = new THREE.ShaderMaterial({
+    uniforms: matUniforms,
+    vertexShader: passThruVertexShader,
+    fragmentShader: shader,
+    side: THREE.DoubleSide,
+  });
+  // prettier-ignore
+  material.defines!.resolution = 
+    `vec2(${sizeX.toFixed(1)}, ${sizeY.toFixed(1)})`;
+
+  const geometry = new THREE.PlaneGeometry(2, 2);
+  const mesh = new THREE.Mesh(geometry, material);
+
+  mesh.matrixAutoUpdate = false;
+  mesh.updateMatrix();
+  scene.add(mesh);
+
+  ///////////
+
+  matUniforms["SDF"].value = generateTex(renderer);
+
+  //////////
+
+  renderer.setSize(sizeX, sizeY, false);
+  const render = () => {
+    renderer.render(scene, camera);
+    requestAnimationFrame(render);
+  };
+  render();
+}
+
+const passThruVertexShader = `
+uniform sampler2D input_;
+
+void main() {
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+  `;
+
+export function generateRandomInds(length: number): number[] {
+  let inds: number[] = Array.from(Array(length), (_, i) => i);
+  const newInds: number[] = [];
+  for (let i = 0; i < length; i++) {
+    const ind = Math.floor(Math.random() * (length - i));
+    newInds.push(inds[ind]);
+    inds.splice(ind, 1);
+  }
+  return newInds;
+}
+
+export function permute<T>(arr: T[], inds: number[]): T[] {
+  const out: T[] = [];
+  for (let i = 0; i < inds.length; i++) out.push(arr[inds[i]]);
+  return out;
+}

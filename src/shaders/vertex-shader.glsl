@@ -86,7 +86,7 @@ void main() {
     newPosition += vec3((pos + offset) * pixelScale, 0.0);
 
     // #include <project_vertex>
-    vec4 mvPosition = modelViewMatrix * vec4(newPosition, 1.0 );
+    vec4 mvPosition = modelViewMatrix * vec4(newPosition, 1.0);
     gl_Position = projectionMatrix * mvPosition;
     #include <clipping_planes_vertex>
 }

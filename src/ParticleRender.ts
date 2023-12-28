@@ -7,7 +7,6 @@ import { CanvasVisual } from "./visuals/CanvasVisuals";
 import { Vec2 } from "./helper";
 
 interface OptParticleRenderParamsSetter {
-  FRUSTUM_SIZE?: number;
   SCALE?: number;
 }
 export class ParticleRenderParams {
@@ -15,7 +14,7 @@ export class ParticleRenderParams {
   SCALE: number;
 
   constructor(params: OptParticleRenderParamsSetter) {
-    this.FRUSTUM_SIZE = params.FRUSTUM_SIZE ?? 1;
+    this.FRUSTUM_SIZE = 1;
     this.SCALE = params.SCALE ?? 0.005;
   }
 }
@@ -82,9 +81,16 @@ export class ParticleRender {
   meshes: THREE.Mesh[] = [];
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
+
+  aspect: number;
+  pixelRatio: number = 1;
+  firstRender: boolean = true;
+
   particleUniforms: { [key: string]: { value: any } };
   copies: number;
   params: ParticleRenderParams;
+  particleVisual: ParticleVisual;
+  canvasVisual: CanvasVisual;
 
   constructor(
     canvasContainer: HTMLElement,
@@ -94,19 +100,18 @@ export class ParticleRender {
     params: OptParticleRenderParamsSetter = {}
   ) {
     this.params = new ParticleRenderParams(params);
+    this.particleVisual = particleVisual;
+    this.canvasVisual = canvasVisual;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.localClippingEnabled = true;
     const width = canvasContainer.clientWidth;
     const height = canvasContainer.clientHeight;
 
-    this.renderer.setPixelRatio(window.devicePixelRatio);
-
     this.renderer.setClearColor(
       canvasVisual.backgroundColor.color,
       canvasVisual.backgroundColor.alpha
     );
-    this.renderer.setPixelRatio(window.devicePixelRatio);
     canvasContainer.appendChild(this.renderer.domElement);
 
     const canvas = this.renderer.domElement;
@@ -118,10 +123,10 @@ export class ParticleRender {
 
     this.scene = new THREE.Scene();
 
-    const aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
+    this.aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
     this.camera = new THREE.OrthographicCamera(
-      (this.params.FRUSTUM_SIZE * aspect) / -2,
-      (this.params.FRUSTUM_SIZE * aspect) / 2,
+      (this.params.FRUSTUM_SIZE * this.aspect) / -2,
+      (this.params.FRUSTUM_SIZE * this.aspect) / 2,
       this.params.FRUSTUM_SIZE / 2,
       this.params.FRUSTUM_SIZE / -2
     );
@@ -206,24 +211,35 @@ export class ParticleRender {
       this.scene.add(particleMesh);
     }
 
+    // This refreshes the internal width/height to be the CSS width/height
+    //  (multiplied by the device pixel ratio)
     canvas.style.removeProperty("height");
     canvas.style.removeProperty("width");
   }
 
   // https://stackoverflow.com/a/45046955/11493659
-  updateSize() {
+
+  hasSizeChanged() {
     const canvas = this.renderer.domElement;
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    if (canvas.width !== width || canvas.height !== height) {
+    const width = canvas.clientWidth * this.pixelRatio;
+    const height = canvas.clientHeight * this.pixelRatio;
+    return canvas.width !== width || canvas.height !== height;
+  }
+
+  updateSize(force?: boolean) {
+    const canvas = this.renderer.domElement;
+    const width = (canvas.clientWidth * this.pixelRatio) | 0; // takes the floor
+    const height = (canvas.clientHeight * this.pixelRatio) | 0;
+    if (this.firstRender) console.log(canvas.width, width);
+    if (force || canvas.width !== width || canvas.height !== height) {
       // "false" here means that THREE.js doesn't override the canvas'
       //  width and height styles (only changes attributes) which is needed
       //  for using canvas.clientWidth/Height
       this.renderer.setSize(width, height, false);
 
-      const aspect = width / height;
-      this.camera.left = (this.params.FRUSTUM_SIZE * aspect) / -2;
-      this.camera.right = (this.params.FRUSTUM_SIZE * aspect) / 2;
+      this.aspect = canvas.clientWidth / canvas.clientHeight;
+      this.camera.left = (this.params.FRUSTUM_SIZE * this.aspect) / -2;
+      this.camera.right = (this.params.FRUSTUM_SIZE * this.aspect) / 2;
       this.camera.top = this.params.FRUSTUM_SIZE / 2;
       this.camera.bottom = this.params.FRUSTUM_SIZE / -2;
       this.camera.updateProjectionMatrix();
@@ -236,7 +252,7 @@ export class ParticleRender {
   }
 
   render() {
-    this.updateSize();
+    this.updateSize(this.firstRender);
 
     const rect = this.renderer.domElement.getBoundingClientRect();
     if (mousePresent)
@@ -252,6 +268,7 @@ export class ParticleRender {
     );
 
     this.renderer.render(this.scene, this.camera);
+    this.firstRender = false;
   }
 }
 

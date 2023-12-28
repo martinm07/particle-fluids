@@ -6,6 +6,8 @@ import { BlueCircleParticle } from "./visuals/ParticleVisuals";
 export { ParticleRender, Algorithm, DefaultCanvas, BlueCircleParticle };
 
 /*
+https://www.tldraw.com/r/Sl6DYUzstVTC4UQcqyUUx
+
 `ParticleRender` sets up a renderer, scene etc. that's the building blocks for all further visualisation techniques.
 `Algorithm` sets up number of particles, their starting positions, and line bounds, and is invoked to make the computations
   that underlie everything else.

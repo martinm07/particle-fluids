@@ -8,7 +8,9 @@ import computeShader6Code from "./shaders/compute-shader-6.glsl";
 import assignPositionsCode from "./shaders/assign-positions.glsl";
 
 import { GPUCompute } from "./GPUCompute";
+import { SDF } from "./sdf";
 import {
+  SolidObjs,
   Vec2,
   bytesToFloat,
   floatToBytesArray,
@@ -16,9 +18,12 @@ import {
   initMask,
   initTexture,
   texCoords,
+  trianglesEqual,
+  visualiseTexture,
 } from "./helper";
+import { LineSegmentsReference, trianglesToLineSegments } from "./boundsHelper";
 
-const NUL = import.meta.env.VITE_NUL;
+const NUL = Number.parseFloat(import.meta.env.VITE_NUL);
 
 interface OptParamsSetter {
   SOLVER_ITERATIONS?: number;
@@ -70,13 +75,19 @@ type GridMap = Map<string, number[]>;
 export class Algorithm {
   last: number = -1;
   params: SimParams;
-  positions?: THREE.Texture;
   initPositions?: () => THREE.Texture;
+  positions?: THREE.Texture;
   velocities?: THREE.Texture;
+
+  bounds: SolidObjs = [];
+  newBounds: SolidObjs = [];
+  boundsChanged: boolean = false;
+
   protected xStarBytes?: Uint8Array;
   protected xStar?: Float32Array;
   protected allNeighbours?: number[][];
   gpuComputes: GPUCompute[] = Array(8);
+  sdf?: SDF;
 
   private renderer: THREE.WebGLRenderer;
   debug: boolean = false;
@@ -122,13 +133,14 @@ export class Algorithm {
   init(
     nParticles: number,
     maxNeighbours: number,
-    lineBounds: number[][] = [],
+    bounds: SolidObjs = [],
     initPositions: (i: number) => Vec2 | number[] | Float32Array | THREE.Texture
   ) {
     this.P_ = 2 * nParticles;
     this.MAX_NEIGHBOURS_ = maxNeighbours;
     this.N_ = 2 * nParticles * maxNeighbours;
 
+    // If initPositions is a function
     if (
       ((value: typeof initPositions): value is (i: number) => Vec2 =>
         typeof value === "function")(initPositions)
@@ -158,8 +170,87 @@ export class Algorithm {
       this.initPositions = () => initPositions;
 
     this.initCreateInputs();
-    const lineBounds_ = lineBounds.flat();
+
+    this.bounds = bounds;
+    const [lineBounds, segmentNormals] = trianglesToLineSegments(bounds, {
+      normals: true,
+      triangleRef: true,
+    });
+    const lineBounds_ = lineBounds.flat(2);
     lineBounds_.push(NUL);
+
+    this.sdf = new SDF(this.renderer, {
+      width: 200,
+      height: 200,
+    });
+    this.sdf.returnSDF(lineBounds, segmentNormals);
+
+    /* DEBUGGING */
+    const canvasContainer = document.getElementById("test-container")!;
+    const vizSDF = () => {
+      if (!this.isInitialized()) return;
+
+      const boundsTest: SolidObjs = [
+        [-1, 1, 1, 1, 0, -0.5],
+        [-1, -1, 1, -1, 0, 0.5],
+        [-0.333, 0.75, 0.333, 0.75, 0.2, 1.3],
+        [-0.5, 0, 0.5, 0, 0, -1],
+      ];
+      const [lineBounds, segmentNormals] = trianglesToLineSegments(boundsTest, {
+        normals: true,
+        triangleRef: true,
+      });
+
+      visualiseTexture(
+        canvasContainer,
+        (renderer) => {
+          const sdf = new SDF(renderer, {
+            width: 200,
+            height: 200,
+          });
+          sdf.returnSDF(lineBounds, segmentNormals);
+          // Move triange at index 2
+          const allSegs = trianglesToLineSegments(
+            [[-0.333, 0.75, 0.333, 0.75, -0.5, 2]],
+            {
+              triangleRef: true,
+              prefillLineSegs: lineBounds,
+              prefillLineSegsNorms: segmentNormals,
+            }
+          );
+          const newTri = allSegs[allSegs.length - 1];
+          sdf.moveSegmentGroup(2, newTri);
+          // Read data (it's possible to read floating-point textures??)
+          const buffer = new Float32Array(200 * 200 * 4);
+          renderer.readRenderTargetPixels(
+            sdf.movegpuc.renderTarget,
+            0,
+            0,
+            200,
+            200,
+            buffer
+          );
+          console.log(buffer);
+
+          return sdf.returnSDF();
+        },
+        `uniform sampler2D SDF;
+
+        void main() {
+            float index = 0.0 + (gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * resolution.x;
+
+            vec2 uv = gl_FragCoord.xy / resolution.xy;
+            vec4 info = texture2D(SDF, uv).xyzw;
+
+            float max = 1.0;
+            info.x = pow(1.0 + info.x, 1.0) - 1.0;
+            if (info.x < 0.0) gl_FragColor = vec4(-info.x / max, 0.0, 0.0, 1.0);
+            else gl_FragColor  = vec4(0.0, 0.0, info.x / max, 1.0);
+        }`,
+        [this.sdf.width, this.sdf.height]
+      );
+    };
+    // setTimeout(vizSDF);
 
     this.gpuComputes[1] = new GPUCompute(
       this.P * 2,
@@ -239,6 +330,7 @@ export class Algorithm {
         { name: "pRefPN" },
         { name: "xStarAndVelocity" },
         { name: "X" },
+        { name: "SDF" },
       ]
     );
     this.gpuComputes[5].updateUniform("NUL", NUL);
@@ -307,23 +399,7 @@ export class Algorithm {
 
     this.initSetInputs();
   }
-  // initPositions(): THREE.DataTexture {
-  //   const texture = initTexture(this.P);
-  //   texture.needsUpdate = true;
-  //   const theArray = texture.image.data;
-  //   for (let i = 0, il = theArray.length; i < il / 4; i++) {
-  //     let num: number;
-  //     if (i % 2 === 0) {
-  //       // x coordinate
-  //       num = (i % 30) * 0.5 - 7.5;
-  //     } else {
-  //       // y coordinate
-  //       num = Math.floor(i / 30) * 1;
-  //     }
-  //     theArray.set(floatToBytesArray(num), i * 4);
-  //   }
-  //   return texture;
-  // }
+
   initCreateInputs() {
     this.positions = this.initPositions!();
     this.velocities = initTexture(this.P);
@@ -395,6 +471,7 @@ export class Algorithm {
     this.gpuComputes[5].varInputs.pRefN_startIndex = this.C5_pRefN_startIndex;
     this.gpuComputes[5].varInputs.pRefN_Length = this.C5_pRefN_Length;
     this.gpuComputes[5].varInputs.numExtras = this.C5_numExtras;
+    this.gpuComputes[5].texInputs.SDF = this.sdf.gpuc.renderTarget.texture;
 
     this.gpuComputes[6].texInputs.pRefPN = this.pRefPN;
     this.gpuComputes[6].varInputs.pRefN_startIndex = this.C6_pRefN_startIndex;
@@ -457,6 +534,9 @@ export class Algorithm {
       delta = fixedDeltaT!;
     }
     this.gpuComputes.forEach((gpuc) => gpuc.updateUniform("deltaT", delta));
+
+    const [updatedLineBounds, updatedNormals] =
+      this.consumeNewBoundsDifference();
 
     this.gpuComputes[1].varInputs.force = new Float32Array(
       Array(this.P).fill([0, -this.params.GRAVITY]).flat()
@@ -591,6 +671,9 @@ export class Algorithm {
     this.gpuComputes.forEach((gpuc) => gpuc.updateVaryings());
 
     this.gpuComputes[5].texInputs.X = this.positions;
+    this.gpuComputes[5].texInputs.SDF = this.sdf.returnSDF();
+    this.gpuComputes[5].updateUniform("SDFtranslate", this.sdf.translate);
+    this.gpuComputes[5].updateUniform("SDFscale", this.sdf.scale);
     this.gpuComputes[5].updateUniform("debug", this.debug);
 
     let xStarAndVelocity = this.gpuComputes[1].renderTarget.texture;
@@ -626,6 +709,12 @@ export class Algorithm {
     if (!this.debug) this.positions = this.gpuComputes[7].renderTarget.texture;
 
     this.debug = false;
+
+    this.bounds = this.newBounds;
+    if (this.boundsChanged)
+      this.sdf.returnSDF(updatedLineBounds, updatedNormals);
+    this.boundsChanged = false;
+
     return this.positions;
   }
 
@@ -633,8 +722,43 @@ export class Algorithm {
     this.last = -1;
   }
 
-  // TODO: Perhaps it would be helpful to make the initial particle positions satisfy the constraints
-  //       to have the consistency of 0 delta time being 0 movement, fixing potential issues with velocity.
+  updateBounds(bounds: SolidObjs) {
+    if (!this.isInitialized()) throw new Error("Algorithm not initialized");
+    if (bounds.length !== this.bounds.length)
+      throw new Error("updateBounds cannot add or remove bounds!");
+
+    this.newBounds = bounds;
+  }
+
+  private consumeNewBoundsDifference(): [
+    segments: LineSegmentsReference,
+    normals: boolean[][]
+  ] {
+    if (!this.isInitialized()) throw new Error("Algorithm not initialized");
+
+    const differentIndices: number[] = [];
+    const differentBounds = this.newBounds.filter((triangle, i) => {
+      if (!trianglesEqual(this.bounds[i], triangle)) {
+        differentIndices.push(i);
+        return true;
+      } else return false;
+    });
+    if (differentBounds.length === 0) return [[], []];
+    this.boundsChanged = true;
+    console.log(differentIndices, differentBounds);
+
+    const [allSegments, allNormals] = trianglesToLineSegments(differentBounds, {
+      normals: true,
+      triangleRef: true,
+      prefillLineSegs: this.sdf.bounds!,
+      prefillLineSegsNorms: this.sdf.segmentNormals!,
+    });
+    const differentSegments = allSegments.slice(allSegments.length - 1);
+    for (let i = 0; i < differentSegments.length; i++)
+      this.sdf.moveSegmentGroup(differentIndices[i], differentSegments[i]);
+    return [allSegments, allNormals];
+  }
+
   correctInitialPositions() {
     this.step(0);
     this.velocities = initTexture(this.P);
@@ -662,6 +786,7 @@ export class Algorithm {
 }
 
 class AlgorithmIsInitialized extends Algorithm {
+  declare sdf: SDF;
   declare positions: THREE.Texture;
   declare velocities: THREE.Texture;
   declare xStarBytes: Uint8Array;

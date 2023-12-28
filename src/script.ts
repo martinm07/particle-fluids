@@ -1,6 +1,16 @@
 import * as THREE from "three";
 
-import { isLittleEndianness, formatNumber } from "./helper";
+import { isLittleEndianness, formatNumber, SolidObjs, Segment } from "./helper";
+
+import {
+  trianglesToLineSegments,
+  segDistance,
+  isInsideSolid,
+  triangleContainsSegment,
+  adjustLineSegmentsIntersection,
+  findNormal,
+  LineSegmentsReference,
+} from "./boundsHelper";
 
 import { Algorithm } from "./Algorithm";
 import { ParticleRender } from "./ParticleRender";
@@ -140,17 +150,78 @@ declare the varyings.
 */
 // #endregion
 
-// order: x1, y1, x2, y2
-const lWall = -10;
-const rWall = 10;
-const tWall = 200;
-const bWall = -20;
-const lineBounds = [
-  [lWall, bWall, rWall, bWall],
-  [lWall, bWall, lWall, tWall],
-  [rWall, bWall, rWall, tWall],
-  [lWall, tWall, rWall, tWall],
+const boundsTest: SolidObjs = [
+  // [0, 0, 1, 0, 1, 1],
+  // [0, 0, 0, 1, 1, 1],
+
+  // [-28, -20, 28, -20, 28, -24],
+  // [-28, -20, -28, -24, 28, -24],
+
+  [-1, 1, 1, 1, 0, -0.5],
+  [-1, -1, 1, -1, 0, 0.5],
+  [-0.333, 0.75, 0.333, 0.75, 0.2, 1.3],
+  // [-1, -1, 1, -1, 0, -0.5],
+
+  // [-1, 0, 1, 0, 0, 1],
+  [-0.5, 0, 0.5, 0, 0, -1],
+
+  // [0, 0, 0, 1, 1, 1],
+  // [0, 0, 1, 0, 1, 1],
+  // [0, 0, 1, 0, 1, -1],
+  // [0, 0, 0, -1, 1, -1],
+  // [0, 0, 0, -1, -1, -1],
+  // [0, 0, -1, 0, -1, -1],
+  // [0, 0, -1, 0, -1, 1],
+  // [0, 0, 0, 1, -1, 1],
+
+  // [0.5, -0.5, 1, 0.5, 0.5, 0.5],
+  // [0.5, -0.5, 1, -0.5, 1, 0.5],
+  // [1, -0.5, 1, -1, -0.5, -0.5],
+  // [-0.5, -1, -0.5, -0.5, 1, -1],
+  // [-1, -1, -1, 0.5, -0.5, -1],
+  // [-0.5, -1, -0.5, 0.5, -1, 0.5],
 ];
+
+console.log(findNormal([-1, -1], [-1 / 3, 0], [1, -1]));
+console.log(
+  adjustLineSegmentsIntersection(
+    [1 / 3, 0],
+    [-0.5, 0, 0.5, 0],
+    true,
+    [1, -1, 1 / 3, 0],
+    false
+  )
+);
+console.log(
+  triangleContainsSegment([1, -0.5, 1, -1, -0.5, -0.5], [0.5, -0.5, 1, -0.5])
+);
+console.log(segDistance([0.5, -0.5, 1, 0.5], [0.75, 0]));
+console.log(
+  isInsideSolid(
+    [-0.75, -0.25],
+    [
+      [1, 0.5, 0.5, 0.5],
+      [1, -0.5, 1, 0.5],
+      [-0.5, -0.5, 0.5, -0.5],
+      [0.5, 0.5, 0.5, -0.5],
+      [1, -0.5, 1, -1],
+      [-0.5, -1, -0.5, -0.5],
+      [1, -1, -0.5, -1],
+      [-1, -1, -1, 0.5],
+      [-1, 0.5, -0.5, -1],
+      [-0.5, -1, -1, -1],
+    ],
+    [false, false, true, false, true, true, true, true, true, true]
+  )
+);
+
+const segmentsTestNest = trianglesToLineSegments(boundsTest, {
+  triangleRef: true,
+});
+console.log(segmentsTestNest);
+// const segmentsTest = basicTrianglesToLineSegments(bounds);
+const segmentsTest = segmentsTestNest.flat();
+// setTimeout(visualiseBounds.bind(null, segmentsTest, 0.25));
 
 // #ededed
 const particleVisual: ParticleVisual = {
@@ -161,7 +232,7 @@ const particleVisual: ParticleVisual = {
 const canvasVisual: CanvasVisual = {
   backgroundColor: new aColor(0xffffff, 1),
   pixelScale: 4,
-  translate: [0, 4],
+  translate: [0, 0],
   copies: 1,
   rotation: 0,
   flipped: [false, false],
@@ -175,24 +246,45 @@ const particleRenderer = new ParticleRender(
   canvasVisual
 );
 
-const PIXEL_SCALE = canvasVisual.pixelScale * particleRenderer.params.SCALE;
-const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
-const linePoints = [];
-linePoints.push(new THREE.Vector3(-20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
-linePoints.push(new THREE.Vector3(-20 * PIXEL_SCALE, -20 * PIXEL_SCALE, 0));
-linePoints.push(new THREE.Vector3(20 * PIXEL_SCALE, -20 * PIXEL_SCALE, 0));
-linePoints.push(new THREE.Vector3(20 * PIXEL_SCALE, 100 * PIXEL_SCALE, 0));
-const linesGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
-const line = new THREE.Line(linesGeometry, lineMaterial);
-console.log(line);
-// particleRenderer.scene.add(line);
+function visualiseBounds(
+  lineSegments: Segment[] | LineSegmentsReference,
+  scale?: number
+) {
+  const SCALE = scale
+    ? scale
+    : canvasVisual.pixelScale * particleRenderer.params.SCALE;
+  const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
+
+  let segments: Segment[];
+  if (((o: any): o is Segment[] => typeof o[0][0] === "number")(lineSegments))
+    segments = lineSegments;
+  else segments = lineSegments.flat();
+
+  for (const seg of segments) {
+    const linePoints = [];
+    linePoints.push(new THREE.Vector3(seg[0] * SCALE, seg[1] * SCALE, 0));
+    linePoints.push(new THREE.Vector3(seg[2] * SCALE, seg[3] * SCALE, 0));
+    const linesGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+    const line = new THREE.Line(linesGeometry, lineMaterial);
+    particleRenderer.scene.add(line);
+  }
+}
+
+const bounds: SolidObjs = [
+  [-20, -20, 20, -20, 20, -21],
+  [-20, -20, -20, -21, 20, -21],
+];
 
 const sim = new Algorithm(particleRenderer.renderer, { SOLVER_ITERATIONS: 3 });
-sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds, (i) => {
-  return [(i % 10) - 5, Math.floor(i / 10)];
-});
-particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
-particleRenderer.render();
+const init = () => {
+  sim.init(N_PARTICLES, MAX_NEIGHBOURS, bounds, (i) => {
+    return [(i % 10) - 5, Math.floor(i / 10)];
+  });
+  particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
+  particleRenderer.render();
+};
+init();
+visualiseBounds(sim.sdf?.bounds!);
 
 let debug = false;
 let paused = true;
@@ -219,6 +311,9 @@ const startStopBtn = document.querySelector("#start-stop")!;
 const resetBtn = document.querySelector("#reset")!;
 const debugBtn = document.querySelector("#debug")!;
 const testBtn = document.querySelector("#test")!;
+const toggleSlidersViz = document.querySelector("#toggleviz")!;
+const slidersContainer = document.querySelector<HTMLElement>(".param-sliders")!;
+
 nextFrameBtn.addEventListener("click", () => {
   frame = true;
 });
@@ -231,15 +326,20 @@ startStopBtn.addEventListener("click", () => {
   nextFrameBtn.disabled = !paused;
   if (paused) sim.pause();
 });
-resetBtn.addEventListener("click", () => {
-  sim.init(N_PARTICLES, MAX_NEIGHBOURS, lineBounds, (i) => {
-    return [(i % 10) - 5, Math.floor(i / 10)];
-  });
-  particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
-  particleRenderer.render();
-});
+resetBtn.addEventListener("click", init);
 testBtn.addEventListener("click", () => {
   test();
+});
+
+let isSlidersVisible = false;
+const updateSlidersVisibility = () => {
+  if (!isSlidersVisible) slidersContainer.style.display = "none";
+  else slidersContainer.style.display = "block";
+};
+updateSlidersVisibility();
+toggleSlidersViz.addEventListener("click", () => {
+  isSlidersVisible = !isSlidersVisible;
+  updateSlidersVisibility();
 });
 
 function makeParameterSlider(

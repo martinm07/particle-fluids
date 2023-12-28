@@ -29,9 +29,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "graham_scan": "^1.0.5",
     "three": "^0.153.0"
   },
   "devDependencies": {
+    "@types/graham_scan": "^1.0.31",
     "@types/three": "^0.152.1",
     "typescript": "^5.0.2",
     "vite": "^4.3.9",
