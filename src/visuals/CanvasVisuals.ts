@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Vec2 } from "../helper";
+import { DefaultFluid, FluidVisual } from "./FluidVisuals";
 
 export class aColor {
   color: THREE.Color;
@@ -26,33 +26,10 @@ export class aColor {
 
 export interface CanvasVisual {
   backgroundColor: aColor;
-  pixelScale: number;
-  copies: number;
-  translate: Vec2 | Vec2[];
-  rotation: number | number[];
-  flipped: [x: boolean, y: boolean] | [x: boolean, y: boolean][];
-  framesBetween: number;
+  fluidCopies: FluidVisual[];
 }
 
 export const DefaultCanvas: CanvasVisual = {
   backgroundColor: new aColor(0xffffff, 1),
-  pixelScale: 4,
-  translate: [0, 0],
-  copies: 1,
-  rotation: 0,
-  flipped: [false, false],
-  framesBetween: 0,
-};
-
-export const MirrorCanvas: CanvasVisual = {
-  backgroundColor: new aColor(0xffffff, 1),
-  pixelScale: 4,
-  translate: [0, 20],
-  copies: 2,
-  rotation: 0,
-  flipped: [
-    [false, false],
-    [false, true],
-  ],
-  framesBetween: 0,
+  fluidCopies: [DefaultFluid],
 };

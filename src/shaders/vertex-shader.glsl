@@ -5,9 +5,9 @@ flat varying vec2 vRefY;
 
 uniform sampler2D texturePosition;
 uniform sampler2D textureVelocity;
-uniform float pixelScale;
 uniform float size;
-uniform vec2 offset;
+uniform mat2 transform;
+uniform vec2 translate;
 
 uniform vec2 iMouse;
 uniform float iTime;
@@ -82,8 +82,10 @@ void main() {
     if (isSizeDynamic) size_ = sizeFunc();
     else size_ = size;
     
-    vec3 newPosition = size_ * position;
-    newPosition += vec3((pos + offset) * pixelScale, 0.0);
+    vec3 newPosition = size_ * 0.2 * position;
+
+    vec2 transformedPos = transform * pos + translate;
+    newPosition += vec3(transformedPos, 0.0);
 
     // #include <project_vertex>
     vec4 mvPosition = modelViewMatrix * vec4(newPosition, 1.0);

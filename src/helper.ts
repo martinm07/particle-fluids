@@ -418,3 +418,10 @@ export function permute<T>(arr: T[], inds: number[]): T[] {
   for (let i = 0; i < inds.length; i++) out.push(arr[inds[i]]);
   return out;
 }
+
+export type Transformation = [
+  iHatX: number,
+  jHatX: number,
+  iHatY: number,
+  jHatY: number
+];

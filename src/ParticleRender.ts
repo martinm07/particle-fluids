@@ -2,24 +2,27 @@ import * as THREE from "three";
 import vertexShaderCode from "./shaders/vertex-shader.glsl";
 import fragmentShaderCode from "./shaders/fragment-shader.glsl";
 import { ParticleGeometry } from "./visuals/ParticleGeometry";
-import { ParticleVisual } from "./visuals/ParticleVisuals";
 import { CanvasVisual } from "./visuals/CanvasVisuals";
 import { Vec2 } from "./helper";
 
 interface OptParticleRenderParamsSetter {
-  SCALE?: number;
+  EDGE_POINT?: Vec2;
 }
 export class ParticleRenderParams {
-  FRUSTUM_SIZE: number;
-  SCALE: number;
+  EDGE_POINT: Vec2;
 
   constructor(params: OptParticleRenderParamsSetter) {
-    this.FRUSTUM_SIZE = 1;
-    this.SCALE = params.SCALE ?? 0.005;
+    // Perhaps a useful way to define the scale is so that
+    //  some point in the simulation space (e.g. (-20, -20))
+    //  lies on the edge of the canvas
+    this.EDGE_POINT = params.EDGE_POINT ?? [-21, -21];
   }
 }
 
-const shaderCode = { vertex: vertexShaderCode, fragment: fragmentShaderCode };
+let shaderCode = { vertex: vertexShaderCode, fragment: fragmentShaderCode };
+function refreshShaderCode() {
+  shaderCode = { vertex: vertexShaderCode, fragment: fragmentShaderCode };
+}
 
 function injectFuncBody(
   shaderSection: "vertex" | "fragment",
@@ -83,24 +86,22 @@ export class ParticleRender {
   camera: THREE.OrthographicCamera;
 
   aspect: number;
+  scale: number = 1;
   pixelRatio: number = 1;
   firstRender: boolean = true;
 
   particleUniforms: { [key: string]: { value: any } };
   copies: number;
   params: ParticleRenderParams;
-  particleVisual: ParticleVisual;
   canvasVisual: CanvasVisual;
 
   constructor(
     canvasContainer: HTMLElement,
     nParticles: number,
-    particleVisual: ParticleVisual,
     canvasVisual: CanvasVisual,
     params: OptParticleRenderParamsSetter = {}
   ) {
     this.params = new ParticleRenderParams(params);
-    this.particleVisual = particleVisual;
     this.canvasVisual = canvasVisual;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -124,69 +125,44 @@ export class ParticleRender {
     this.scene = new THREE.Scene();
 
     this.aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
-    this.camera = new THREE.OrthographicCamera(
-      (this.params.FRUSTUM_SIZE * this.aspect) / -2,
-      (this.params.FRUSTUM_SIZE * this.aspect) / 2,
-      this.params.FRUSTUM_SIZE / 2,
-      this.params.FRUSTUM_SIZE / -2
-    );
+    this.camera = new THREE.OrthographicCamera();
     this.camera.position.z = 1;
     this.scene.add(this.camera);
 
     this.particleUniforms = {
       texturePosition: { value: null },
       textureVelocity: { value: null },
-      pixelScale: { value: canvasVisual.pixelScale },
       iMouse: { value: [NaN, NaN] },
       iTime: { value: 0 },
     };
 
-    const isColorDynamic = typeof particleVisual.color === "string";
-    const isSizeDynamic = typeof particleVisual.color === "string";
-
-    injectFuncBody("vertex", "sizeFunc", particleVisual.size);
-    insertBooleanValue("vertex", "isSizeDynamic", isSizeDynamic);
-    if (!isSizeDynamic) {
-      this.particleUniforms["size"] = { value: particleVisual.size };
-    }
-
-    injectFuncBody("fragment", "colorFunc", particleVisual.color);
-    insertBooleanValue("fragment", "isColorDynamic", isColorDynamic);
-    if (!isColorDynamic) {
-      this.particleUniforms["color"] = { value: particleVisual.color };
-    }
-
-    type Flipped = [x: boolean, y: boolean] | [x: boolean, y: boolean][];
-    type Translation = Vec2 | Vec2[];
-    const isOneFlipVal = (value: Flipped): value is [x: boolean, y: boolean] =>
-      typeof value[0] === "boolean";
-    const isOneTransVal = (value: Translation): value is Vec2 =>
-      typeof value[0] === "number";
-
-    this.copies = canvasVisual.copies;
+    this.copies = canvasVisual.fluidCopies.length;
     for (let i = 0; i < this.copies; i++) {
-      let rotation: number;
-      if (typeof canvasVisual.rotation !== "number")
-        rotation = canvasVisual.rotation[i];
-      else rotation = canvasVisual.rotation;
+      const fluidVisual = canvasVisual.fluidCopies[i];
+      const particleVisual = fluidVisual.particleVisual;
+      refreshShaderCode();
 
-      let flippedX: boolean;
-      let flippedY: boolean;
-      if (isOneFlipVal(canvasVisual.flipped)) {
-        flippedX = canvasVisual.flipped[0];
-        flippedY = canvasVisual.flipped[1];
-      } else {
-        flippedX = canvasVisual.flipped[i][0];
-        flippedY = canvasVisual.flipped[i][1];
+      const isColorDynamic = typeof particleVisual.color === "string";
+      const isSizeDynamic = typeof particleVisual.color === "string";
+
+      injectFuncBody("vertex", "sizeFunc", particleVisual.size);
+      insertBooleanValue("vertex", "isSizeDynamic", isSizeDynamic);
+      if (!isSizeDynamic) {
+        this.particleUniforms["size"] = { value: particleVisual.size };
       }
 
-      let translation: Vec2;
-      if (isOneTransVal(canvasVisual.translate))
-        translation = canvasVisual.translate;
-      else translation = canvasVisual.translate[i];
+      injectFuncBody("fragment", "colorFunc", particleVisual.color);
+      insertBooleanValue("fragment", "isColorDynamic", isColorDynamic);
+      if (!isColorDynamic) {
+        this.particleUniforms["color"] = { value: particleVisual.color };
+      }
 
       const material = new THREE.ShaderMaterial({
-        uniforms: { ...this.particleUniforms, offset: { value: translation } },
+        uniforms: {
+          ...this.particleUniforms,
+          translate: { value: fluidVisual.translate },
+          transform: { value: fluidVisual.transform },
+        },
         vertexShader: shaderCode.vertex,
         fragmentShader: shaderCode.fragment,
         side: THREE.DoubleSide,
@@ -196,14 +172,7 @@ export class ParticleRender {
       const geometry = new ParticleGeometry(nParticles, particleVisual.shape);
       const particleMesh = new THREE.Mesh(geometry, material);
 
-      particleMesh.setRotationFromAxisAngle(
-        new THREE.Vector3(0, 0, 1),
-        rotation
-      );
-      if (flippedX) particleMesh.rotateY(Math.PI);
-      if (flippedY) particleMesh.rotateX(Math.PI);
-
-      particleMesh.scale.set(this.params.SCALE, this.params.SCALE, 1);
+      particleMesh.scale.set(this.scale, this.scale, 1);
 
       particleMesh.matrixAutoUpdate = false;
       particleMesh.updateMatrix();
@@ -230,7 +199,7 @@ export class ParticleRender {
     const canvas = this.renderer.domElement;
     const width = (canvas.clientWidth * this.pixelRatio) | 0; // takes the floor
     const height = (canvas.clientHeight * this.pixelRatio) | 0;
-    if (this.firstRender) console.log(canvas.width, width);
+
     if (force || canvas.width !== width || canvas.height !== height) {
       // "false" here means that THREE.js doesn't override the canvas'
       //  width and height styles (only changes attributes) which is needed
@@ -238,11 +207,45 @@ export class ParticleRender {
       this.renderer.setSize(width, height, false);
 
       this.aspect = canvas.clientWidth / canvas.clientHeight;
-      this.camera.left = (this.params.FRUSTUM_SIZE * this.aspect) / -2;
-      this.camera.right = (this.params.FRUSTUM_SIZE * this.aspect) / 2;
-      this.camera.top = this.params.FRUSTUM_SIZE / 2;
-      this.camera.bottom = this.params.FRUSTUM_SIZE / -2;
+
+      this.camera.left = 1 / -2;
+      this.camera.right = 1 / 2;
+      this.camera.top = 1 / 2;
+      this.camera.bottom = 1 / -2;
+      if (width > height) {
+        this.camera.left *= this.aspect;
+        this.camera.right *= this.aspect;
+      } else {
+        this.camera.top /= this.aspect;
+        this.camera.bottom /= this.aspect;
+      }
+
       this.camera.updateProjectionMatrix();
+
+      const pX = Math.abs(this.params.EDGE_POINT[0]);
+      const pY = Math.abs(this.params.EDGE_POINT[1]);
+
+      if (pY > pX) {
+        // p prefers the top/bottom, so if a wider aspect then def cY
+        if (width >= height) this.scale = 1 / pY;
+        else if (pY - this.aspect * pX > 0) this.scale = this.aspect / pY;
+        else this.scale = 1 / pX;
+      } else {
+        if (width <= height) this.scale = 1 / pX;
+        else if (pX - this.aspect * pY > 0) this.scale = this.aspect / pX;
+        else this.scale = 1 / pY;
+      }
+      // A scale of 1 means that a Plane of height/width 1 would be what extends to the edge,
+      //  yet the coordinate at the corner of the plane is (0.5, 0.5), not the (1, 1) that
+      //  this.params.EDGE_POINT would expect
+      //  (this happens because we expect the full height/width of the camera viewing frustrum
+      //  to extend out to any point from (0, 0) instead of correctly saying half, since it's
+      //  centered on the origin).
+      this.scale *= 0.5;
+      // console.log(this.scale);
+
+      this.meshes[0].scale.set(this.scale, this.scale, 1);
+      this.meshes[0].updateMatrix();
     }
   }
 

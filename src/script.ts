@@ -18,6 +18,7 @@ import { test } from "./__tests__/Algorithm.test";
 import { ParticleVisual } from "./visuals/ParticleVisuals";
 import { CanvasVisual, aColor } from "./visuals/CanvasVisuals";
 import { CircleShape } from "./visuals/ParticleGeometry";
+import { FluidVisual } from "./visuals/FluidVisuals";
 
 const MAX_NEIGHBOURS = 64;
 // There is an issue with non-power-of-2 values here- quite mysterious
@@ -229,20 +230,19 @@ const particleVisual: ParticleVisual = {
   size: 1,
   shape: new CircleShape(),
 };
+const fluidVisual: FluidVisual = {
+  transform: [1, 0, 0, 1],
+  translate: [0, 0],
+  particleVisual: particleVisual,
+};
 const canvasVisual: CanvasVisual = {
   backgroundColor: new aColor(0xffffff, 1),
-  pixelScale: 4,
-  translate: [0, 0],
-  copies: 1,
-  rotation: 0,
-  flipped: [false, false],
-  framesBetween: 0,
+  fluidCopies: [fluidVisual],
 };
 
 const particleRenderer = new ParticleRender(
   container,
   N_PARTICLES,
-  particleVisual,
   canvasVisual
 );
 
@@ -250,9 +250,7 @@ function visualiseBounds(
   lineSegments: Segment[] | LineSegmentsReference,
   scale?: number
 ) {
-  const SCALE = scale
-    ? scale
-    : canvasVisual.pixelScale * particleRenderer.params.SCALE;
+  const SCALE = scale ? scale : particleRenderer.scale;
   const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
 
   let segments: Segment[];

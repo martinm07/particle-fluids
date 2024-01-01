@@ -1,3 +1,26 @@
+# v1.2.0
+
+### General:
+
+- Add "visuals/FluidVisuals.ts", which most importantly exports the "FluidVisual" interface, with "transform", "translate" and "particleVisual" as fields. This replaces fields such as "copies", "translate", "rotation" and "flipped" that were on CanvasVisual, with copies now being a list of FluidVisuals, and translate/rotation/flipped being compressed into a single linear transformation 2x2 matrix.
+  The new structure for describing visuals is; CanvasVisual has multiple FluidVisuals attached, each of which has one ParticleVisual attached.
+
+### In `helper.ts`:
+
+- Add the type "Transformation", which describes a linear transformation in 2D space (i.e. a 2x2 matrix flattened into a list of length 4)
+
+### In `ParticleRender.ts`:
+
+- Remove FRUSTUM_SIZE from the params
+- Change SCALE to the Vec2 EDGE_POINT in params, which now is used in the updateSize() method to change the scale of particleMesh so that this coordinate in simulation space lies on the edge of the canvas.
+- Make shaderCode variable refresh back to the original after every iteration for fluidCopies in the constructor, since now each copy may have a different particleVisual object attached.
+- Add fluidVisual.translate and fluidVisual.transform to particleMesh as uniforms, to be used by the vertex shader.
+- Remove particleVisual as argument for constructor(), since all we now need is canvasVisual.
+
+### In `vertex-shader.glsl`:
+
+- Remove the uniforms pixelScale and offset, and add transform and translate, which are applied to the pos as transform \* pos + translate. We do this here instead of on the particleMesh itself in (Three)JS because we don't want it to affect ParticleVisual (e.g. stretching the particle circles into ovals), only the positions of the particles.
+
 # v1.1.0
 
 ### General:
