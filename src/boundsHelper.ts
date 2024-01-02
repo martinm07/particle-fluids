@@ -1,11 +1,4 @@
-import {
-  Vec2,
-  Segment,
-  Triangle,
-  SolidObjs,
-  generateRandomInds,
-  permute,
-} from "./helper";
+import { Vec2, Segment, Triangle, SolidObjs } from "./helper";
 
 const lEq = (l1: unknown[], l2: unknown[]) => l1.every((el, i) => el === l2[i]);
 const dot = (v1: Vec2, v2: Vec2) => v1[0] * v2[0] + v1[1] * v2[1];
@@ -440,6 +433,44 @@ function getIntersection(s1: Segment, s2: Segment): Vec2 {
   return [xPrime, yPrime];
 }
 
+/**
+ * If a line segment crosses over 2 or more solids, each seperate "adjustment" at
+ * the intersection points will fail to consider the intersection with the other
+ * solid, and thus we need this function to not leave line segments that go across
+ * the empty gaps that were supposed to be there.
+ * This is done by collecting all vertices from all adjustments of the segment and
+ * sorting them, then pairing them up again.
+ */
+function combineTriSegPartials(verts: number[]): Segment[] {
+  if (verts.length === 0) return [];
+  else if (verts.length === 4) return [<Segment>verts];
+
+  const XorY = verts[0] !== verts[2] ? 0 : 1;
+  const vertsXInds = verts
+    .filter((_, i) => i % 2 === XorY)
+    .map((el, i) => [el, i]);
+  vertsXInds.sort((a, b) => a[0] - b[0]);
+  let sortedVerts: Vec2[] = vertsXInds.map((el) => [
+    verts[el[1] * 2],
+    verts[el[1] * 2 + 1],
+  ]);
+  // If the first two are duplicates, then we'll have the wrong parity when
+  //  pairing the vertices, and since that probably means the last two are
+  //  also duplicates, we remove one of both.
+  // IMP: There may be cases where this fails! More thorough testing is due.
+  if (
+    sortedVerts[0][0] === sortedVerts[1][0] &&
+    sortedVerts[0][1] === sortedVerts[1][1]
+  )
+    sortedVerts = sortedVerts.slice(1, -1);
+
+  const final: Segment[] = [];
+  for (let i = 0; i < sortedVerts.length / 2; i++) {
+    final.push([...sortedVerts[i * 2], ...sortedVerts[i * 2 + 1]]);
+  }
+  return final;
+}
+
 // IMP:
 // `triangleContainsPoint` may either include points on the edge of the triangle or not (currently it does)
 // `segDistance` may either classify points at the edge of the segment's "lane" as isEnd or not (currently it's not)
@@ -531,6 +562,14 @@ export function trianglesToLineSegments(
     // Exclude adding these full sides of the triangle, as they've already been
     //  "partially added" since they're intersecting other things
     const excludeFullTriSeg: number[] = [];
+
+    // This collects all the adjustments the following loop makes to the triangle segments
+    //  for intersections with other segments, so that we may instill them afterwards.
+    // prettier-ignore
+    const triSegPartials: [v1: number[], v2: number[], v3: number[]] = [[], [], []];
+    // prettier-ignore
+    const triSegNormals: [v1: boolean, v2: boolean, v3: boolean] = [false, false, false];
+
     // Apparently JavaScript will recompute this value every iteration if it is not
     //  factored out, causing infinite loops...
     const outSegmentsLen = outSegments.length;
@@ -556,20 +595,32 @@ export function trianglesToLineSegments(
           const Ip = getIntersection(triSeg, outSegments[j]);
           const triSegNormal = findNormal(vi, vj, vOther);
           const segNormal = outSegmentNormals[j];
-          outSegments.push(
-            ...adjustLineSegmentsIntersection(
-              Ip,
-              triSeg,
-              triSegNormal,
-              seg,
-              segNormal
-            )
+
+          const adjusted = adjustLineSegmentsIntersection(
+            Ip,
+            triSeg,
+            triSegNormal,
+            seg,
+            segNormal
           );
-          outSegmentNormals.push(triSegNormal, segNormal);
-          triInds.push(i + preNumGroups, triInds[j]);
+
+          triSegPartials[k].push(...adjusted[0]);
+          outSegments.push(adjusted[1]);
+          triSegNormals[k] = triSegNormal;
+          outSegmentNormals.push(segNormal);
+          triInds.push(triInds[j]);
         }
       }
     }
+
+    for (let k = 0; k < 3; k++) {
+      const segments = combineTriSegPartials(triSegPartials[k]);
+
+      outSegments.push(...segments);
+      outSegmentNormals.push(...Array(segments.length).fill(triSegNormals[k]));
+      triInds.push(...Array(segments.length).fill(i));
+    }
+
     // Remove segments on the remove list, since they're inside the new triangle,
     //  or have been re-added "partially", since they intersect the new triangle.
     outSegments = outSegments.filter((_, i) => !removeList.includes(i));
@@ -641,28 +692,30 @@ export function basicTrianglesToLineSegments(bounds: SolidObjs) {
   return outSegments;
 }
 
-export function cleanupLineSegments(
-  segments: Segment[],
-  normals: boolean[]
-): [out: Segment[], outNorms: boolean[]] {
+export function cleanupLineSegments(segments: Segment[]): Segment[];
+// prettier-ignore
+export function cleanupLineSegments(segments: Segment[], normals: boolean[]): [out: Segment[], outNorms: boolean[]];
+
+/**
+ * Cleans up a list of line segments, and may reflect the changes on the associated normals (boolean list).
+ * - Remove segments that start and end at the same point
+ * - Remove duplicate segments
+ */
+export function cleanupLineSegments(segments: Segment[], normals?: boolean[]) {
   let out: Segment[] = Array(segments.length);
-  let outNorms: boolean[] = Array(normals.length);
+  let outNorms: boolean[] = Array(normals ? normals.length : 0);
 
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
-    const norm = normals[i];
+    const norm = normals?.[i];
     if (seg[0] === seg[2] && seg[1] === seg[3]) continue;
     if (segmentInList(seg, out)) continue;
     out[i] = seg;
-    outNorms[i] = norm;
+    if (norm) outNorms[i] = norm;
   }
   out = out.filter((n) => n);
-  // TODO: Remove this permute, unnecessary
   outNorms = outNorms.filter((n) => n || !n);
-  const inds = generateRandomInds(out.length);
-  out = permute(out, inds);
-  outNorms = permute(outNorms, inds);
 
-  console.log(out, outNorms);
-  return [out, outNorms];
+  if (normals) return [out, outNorms];
+  else return out;
 }

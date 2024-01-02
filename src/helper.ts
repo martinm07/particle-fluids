@@ -425,3 +425,17 @@ export type Transformation = [
   iHatY: number,
   jHatY: number
 ];
+
+export function applyTransform(matrix: Transformation, v: Vec2): Vec2 {
+  return [
+    matrix[0] * v[0] + matrix[1] * v[1],
+    matrix[2] * v[0] + matrix[3] * v[1],
+  ];
+}
+
+export function inverseTransform(matrix: Transformation): Transformation {
+  const determinantReciprocal =
+    1 / (matrix[0] * matrix[3] - matrix[1] * matrix[2]);
+  const invMat: Transformation = [matrix[3], -matrix[1], -matrix[2], matrix[0]];
+  return <Transformation>invMat.map((el) => determinantReciprocal * el);
+}

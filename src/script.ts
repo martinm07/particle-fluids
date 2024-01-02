@@ -2,15 +2,7 @@ import * as THREE from "three";
 
 import { isLittleEndianness, formatNumber, SolidObjs, Segment } from "./helper";
 
-import {
-  trianglesToLineSegments,
-  segDistance,
-  isInsideSolid,
-  triangleContainsSegment,
-  adjustLineSegmentsIntersection,
-  findNormal,
-  LineSegmentsReference,
-} from "./boundsHelper";
+import { LineSegmentsReference } from "./boundsHelper";
 
 import { Algorithm } from "./Algorithm";
 import { ParticleRender } from "./ParticleRender";
@@ -151,82 +143,9 @@ declare the varyings.
 */
 // #endregion
 
-const boundsTest: SolidObjs = [
-  // [0, 0, 1, 0, 1, 1],
-  // [0, 0, 0, 1, 1, 1],
-
-  // [-28, -20, 28, -20, 28, -24],
-  // [-28, -20, -28, -24, 28, -24],
-
-  [-1, 1, 1, 1, 0, -0.5],
-  [-1, -1, 1, -1, 0, 0.5],
-  [-0.333, 0.75, 0.333, 0.75, 0.2, 1.3],
-  // [-1, -1, 1, -1, 0, -0.5],
-
-  // [-1, 0, 1, 0, 0, 1],
-  [-0.5, 0, 0.5, 0, 0, -1],
-
-  // [0, 0, 0, 1, 1, 1],
-  // [0, 0, 1, 0, 1, 1],
-  // [0, 0, 1, 0, 1, -1],
-  // [0, 0, 0, -1, 1, -1],
-  // [0, 0, 0, -1, -1, -1],
-  // [0, 0, -1, 0, -1, -1],
-  // [0, 0, -1, 0, -1, 1],
-  // [0, 0, 0, 1, -1, 1],
-
-  // [0.5, -0.5, 1, 0.5, 0.5, 0.5],
-  // [0.5, -0.5, 1, -0.5, 1, 0.5],
-  // [1, -0.5, 1, -1, -0.5, -0.5],
-  // [-0.5, -1, -0.5, -0.5, 1, -1],
-  // [-1, -1, -1, 0.5, -0.5, -1],
-  // [-0.5, -1, -0.5, 0.5, -1, 0.5],
-];
-
-console.log(findNormal([-1, -1], [-1 / 3, 0], [1, -1]));
-console.log(
-  adjustLineSegmentsIntersection(
-    [1 / 3, 0],
-    [-0.5, 0, 0.5, 0],
-    true,
-    [1, -1, 1 / 3, 0],
-    false
-  )
-);
-console.log(
-  triangleContainsSegment([1, -0.5, 1, -1, -0.5, -0.5], [0.5, -0.5, 1, -0.5])
-);
-console.log(segDistance([0.5, -0.5, 1, 0.5], [0.75, 0]));
-console.log(
-  isInsideSolid(
-    [-0.75, -0.25],
-    [
-      [1, 0.5, 0.5, 0.5],
-      [1, -0.5, 1, 0.5],
-      [-0.5, -0.5, 0.5, -0.5],
-      [0.5, 0.5, 0.5, -0.5],
-      [1, -0.5, 1, -1],
-      [-0.5, -1, -0.5, -0.5],
-      [1, -1, -0.5, -1],
-      [-1, -1, -1, 0.5],
-      [-1, 0.5, -0.5, -1],
-      [-0.5, -1, -1, -1],
-    ],
-    [false, false, true, false, true, true, true, true, true, true]
-  )
-);
-
-const segmentsTestNest = trianglesToLineSegments(boundsTest, {
-  triangleRef: true,
-});
-console.log(segmentsTestNest);
-// const segmentsTest = basicTrianglesToLineSegments(bounds);
-const segmentsTest = segmentsTestNest.flat();
-// setTimeout(visualiseBounds.bind(null, segmentsTest, 0.25));
-
 // #ededed
 const particleVisual: ParticleVisual = {
-  color: new THREE.Color(0xededed),
+  color: new THREE.Color(0xff0000),
   size: 1,
   shape: new CircleShape(),
 };
@@ -246,7 +165,7 @@ const particleRenderer = new ParticleRender(
   canvasVisual
 );
 
-function visualiseBounds(
+export function visualiseBounds(
   lineSegments: Segment[] | LineSegmentsReference,
   scale?: number
 ) {
@@ -271,6 +190,11 @@ function visualiseBounds(
 const bounds: SolidObjs = [
   [-20, -20, 20, -20, 20, -21],
   [-20, -20, -20, -21, 20, -21],
+  [-10, -20, -10, 20, -11, 20],
+  [-10, -20, -11, -20, -11, 20],
+  [10, -20, 10, 20, 11, 20],
+  [10, -20, 11, -20, 11, 20],
+  [-25.876949740034664, -21, 25.876949740034664, -21, 25.776949740034664, 21],
 ];
 
 const sim = new Algorithm(particleRenderer.renderer, { SOLVER_ITERATIONS: 3 });
@@ -280,6 +204,7 @@ const init = () => {
   });
   particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
   particleRenderer.render();
+  console.log(particleRenderer.relativeLineBounds([[0, 0, 1, 0, 1, 1]], 0));
 };
 init();
 visualiseBounds(sim.sdf?.bounds!);

@@ -1,3 +1,24 @@
+# v1.3.0
+
+### General:
+
+- Add new optional field to FluidVisual "invTransform", which is used to house the inverse transformation of the transform field on that object.
+- Factor intermediate developer debugging/testing code from "script.ts" into a new file "devtesting.ts", which is called seperately in "index.html".
+
+### In `boundsHelper.ts`:
+
+- Fix flaw in trianglesToLineSegments(), which meant that large segments passing through multiple already laid-down solids wouldn't properly adjust to all the intersections.
+- In cleanupLineSegments(), remove an unnecessary random permutation that was applied to the input.
+- Make the second argument ("normals") in cleanupLineSegments() optional.
+
+### In `ParticleRender.ts`:
+
+- Add the relativeLineBounds() method, which translates percentages of the canvas height/width into coordinates in the simulation space, from the perspective of one of the FluidVisuals (i.e. so that after the transform and translate the bounds ends up in the expected places), which is helpful for trying to fit one in the canvas, and building the rest off of that.
+
+### In `helper.ts`:
+
+- Add the functions applyTransform() and inverseTransform() which apply a linear transformation to a 2D vector, and calculate the inverse of a 2x2 matrix, respectively.
+
 # v1.2.0
 
 ### General:

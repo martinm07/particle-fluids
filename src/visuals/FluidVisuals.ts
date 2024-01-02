@@ -5,6 +5,8 @@ export interface FluidVisual {
   transform: Transformation;
   translate: Vec2;
   particleVisual: ParticleVisual;
+  // This is useful to store rather than recompute (potentially) every frame
+  invTransform?: Transformation;
 }
 
 export const DefaultFluid: FluidVisual = {

@@ -3,7 +3,13 @@ import vertexShaderCode from "./shaders/vertex-shader.glsl";
 import fragmentShaderCode from "./shaders/fragment-shader.glsl";
 import { ParticleGeometry } from "./visuals/ParticleGeometry";
 import { CanvasVisual } from "./visuals/CanvasVisuals";
-import { Vec2 } from "./helper";
+import {
+  SolidObjs,
+  Transformation,
+  Vec2,
+  applyTransform,
+  inverseTransform,
+} from "./helper";
 
 interface OptParticleRenderParamsSetter {
   EDGE_POINT?: Vec2;
@@ -139,6 +145,7 @@ export class ParticleRender {
     this.copies = canvasVisual.fluidCopies.length;
     for (let i = 0; i < this.copies; i++) {
       const fluidVisual = canvasVisual.fluidCopies[i];
+      fluidVisual.invTransform = inverseTransform(fluidVisual.transform);
       const particleVisual = fluidVisual.particleVisual;
       refreshShaderCode();
 
@@ -252,6 +259,53 @@ export class ParticleRender {
   setParticleStates(positions: THREE.Texture, velocities: THREE.Texture) {
     this.particleUniforms["texturePosition"].value = positions;
     this.particleUniforms["textureVelocity"].value = velocities;
+  }
+
+  relativeLineBounds(bounds: SolidObjs, fluidCopyID?: number) {
+    const newBounds: SolidObjs = Array(bounds.length);
+    for (let i = 0; i < bounds.length; i++) {
+      const tri = bounds[i];
+      const transform: Transformation = fluidCopyID
+        ? this.canvasVisual.fluidCopies[fluidCopyID].invTransform!
+        : [1, 0, 0, 1];
+      const translate: Vec2 = fluidCopyID
+        ? this.canvasVisual.fluidCopies[fluidCopyID].translate
+        : [0, 0];
+
+      const translateCanvasCoord = (v: Vec2): Vec2 => {
+        // 1) Translate canvas coordinate where 0 is the bottom/left
+        //    side of the canvas and 1 is the top/right, into a point
+        //    in the simulation space.
+
+        const vNew: Vec2 = [0, 0];
+        const canvas = this.renderer.domElement;
+        if (canvas.clientWidth > canvas.clientHeight) {
+          vNew[0] = v[0] * this.aspect - this.aspect / 2;
+          vNew[1] = v[1] - 0.5;
+        } else {
+          vNew[0] = v[0] - 0.5;
+          vNew[1] = v[1] * this.aspect - this.aspect / 2;
+        }
+        console.log(this.scale, this.aspect);
+        vNew[0] /= this.scale;
+        vNew[1] /= this.scale;
+
+        // 2) Apply the inverse translate and transform of the
+        //    specified fluidCopy.
+
+        const simCoord = applyTransform(transform, [
+          vNew[0] - translate[0],
+          vNew[1] - translate[1],
+        ]);
+        return simCoord;
+      };
+
+      const v1 = translateCanvasCoord([tri[0], tri[1]]);
+      const v2 = translateCanvasCoord([tri[2], tri[3]]);
+      const v3 = translateCanvasCoord([tri[4], tri[5]]);
+      newBounds[i] = [...v1, ...v2, ...v3];
+    }
+    return newBounds;
   }
 
   render() {
