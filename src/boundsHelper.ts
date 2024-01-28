@@ -1,17 +1,25 @@
-import { Vec2, Segment, Triangle, SolidObjs } from "./helper";
+import { Vec2, Segment, Triangle, SolidObjs, lEq, fEq } from "./helper";
 
-const lEq = (l1: unknown[], l2: unknown[]) => l1.every((el, i) => el === l2[i]);
 const dot = (v1: Vec2, v2: Vec2) => v1[0] * v2[0] + v1[1] * v2[1];
 const scale = (v: Vec2, c: number): Vec2 => [v[0] * c, v[1] * c];
 const add = (v1: Vec2, v2: Vec2): Vec2 => [v1[0] + v2[0], v1[1] + v2[1]];
 const sub = (v1: Vec2, v2: Vec2): Vec2 => [v1[0] - v2[0], v1[1] - v2[1]];
 
+// export function segmentsEqual(s1: Segment, s2: Segment) {
+//   if (s1[0] === s2[0] && s1[1] === s2[1]) {
+//     if (s1[2] === s2[2] && s1[3] === s2[3]) return true;
+//     else return false;
+//   } else if (s1[2] === s2[0] && s1[3] === s2[1]) {
+//     if (s1[0] === s2[2] && s1[1] === s2[3]) return true;
+//     else return false;
+//   } else return false;
+// }
 export function segmentsEqual(s1: Segment, s2: Segment) {
-  if (s1[0] === s2[0] && s1[1] === s2[1]) {
-    if (s1[2] === s2[2] && s1[3] === s2[3]) return true;
+  if (fEq(s1[0], s2[0]) && fEq(s1[1], s2[1])) {
+    if (fEq(s1[2], s2[2]) && fEq(s1[3], s2[3])) return true;
     else return false;
-  } else if (s1[2] === s2[0] && s1[3] === s2[1]) {
-    if (s1[0] === s2[2] && s1[1] === s2[3]) return true;
+  } else if (fEq(s1[2], s2[0]) && fEq(s1[3], s2[1])) {
+    if (fEq(s1[0], s2[2]) && fEq(s1[1], s2[3])) return true;
     else return false;
   } else return false;
 }
@@ -46,8 +54,13 @@ const pointOnSegmentLine = (seg: Segment, p: Vec2) => {
   // `seg` is a line segment from point A to point B. If we are able to describe P
   // as P = A + w1 * (B - A), then it must lie on the line AB. Solving for w1 in both
   // the x coordinate and y coordinate, substituting and simplifying gives the following.
+  // return (
+  //   (p[0] - seg[0]) * (seg[3] - seg[1]) === (p[1] - seg[1]) * (seg[2] - seg[0])
+  // );
   return (
-    (p[0] - seg[0]) * (seg[3] - seg[1]) === (p[1] - seg[1]) * (seg[2] - seg[0])
+    Math.abs(
+      (p[0] - seg[0]) * (seg[3] - seg[1]) - (p[1] - seg[1]) * (seg[2] - seg[0])
+    ) < 0.000001
   );
 };
 
@@ -95,7 +108,8 @@ function triangleContainsPoint(triangle: Triangle, p: Vec2) {
   const w2 =
     (Ax * (By - Ay) + (Py - Ay) * (Bx - Ax) - Px * (By - Ay)) /
     ((Cy - Ay) * (Bx - Ax) - (Cx - Ax) * (By - Ay));
-  return w1 >= 0 && w2 >= 0 && w1 + w2 <= 1;
+  return w1 >= -0.000001 && w2 >= -0.000001 && w1 + w2 <= 1.000001;
+  // return w1 >= 0 && w2 >= 0 && w1 + w2 <= 1;
 }
 
 export function triangleContainsSegment(
@@ -110,7 +124,7 @@ export function triangleContainsSegment(
     [seg[0], seg[1]],
     [seg[2], seg[3]],
   ]) {
-    isContained = isContained && triangleContainsPoint(triangle, [Px, Py]);
+    isContained &&= triangleContainsPoint(triangle, [Px, Py]);
   }
   return isContained;
 }
@@ -169,7 +183,7 @@ export const segDistance = (seg: Segment, c: Vec2): SegClosestPoint => {
   const p2: Vec2 = [seg[2], seg[3]];
   const p12: Vec2 = [seg[0] - seg[2], seg[1] - seg[3]];
 
-  // It's <= instead of <, because when c is one the edge of the "lane", we'd like it
+  // It's <= instead of <, because when c is on the edge of the "lane", we'd like it
   //  to be considered outside the lane instead of inside.
   const p1CSide = dot(sub(p1, c), p12) <= 0;
   const p2CSide = dot(sub(p2, c), p12) <= 0;
@@ -199,13 +213,19 @@ export const segDistance = (seg: Segment, c: Vec2): SegClosestPoint => {
   }
 };
 
+// prettier-ignore
+export function isInsideSolid(p: Vec2, segments: Segment[], segmentNormals: boolean[], returnNormalOnP?: false): boolean;
+// prettier-ignore
+export function isInsideSolid(p: Vec2, segments: Segment[], segmentNormals: boolean[], returnNormalOnP: true): [isInside: boolean, closestNormal: Vec2 | null];
+
 export function isInsideSolid(
   p: Vec2,
   segments: Segment[],
-  segmentNormals: boolean[]
+  segmentNormals: boolean[],
+  returnNormalOnP?: boolean
 ) {
   // debugger;
-  if (segments.length === 0) return false;
+  if (segments.length === 0) return returnNormalOnP ? [false, null] : false;
   // Find the closest point on a segment to p, and check if the normal points towards
   //  or away from p, saying if p is inside or outside a solid.
   // This works because we can assume that no part of any segment lies inside a solid
@@ -261,13 +281,46 @@ export function isInsideSolid(
     }
   }
 
+  let isInside = false;
+  let canReturnNormal = false;
   if (typeof knownIsInside !== "undefined") {
-    return closestLen === 0 ? false : knownIsInside;
+    isInside = closestLen === 0 ? false : knownIsInside;
     // if it == 0, then either p is ON the segment, or else just generally on its span
     //  (but then the closest point would be the end, which is handled before this).
-  } else if (dot(sub(closestPoint, p), closestNormal) <= 0) return true;
-  // Due to potential numerical errors of segDistance, we can't truly rely on the == 0 check above
-  else if (pointOnSegmentLine(segment!, p)) return true;
+  } else if (dot(sub(closestPoint, p), closestNormal) < 0) isInside = true;
+  // Due to potential numerical errors of segDistance, we can't truly rely on an == 0 check above
+  else if (pointOnSegmentLine(segment!, p)) {
+    isInside = true;
+    canReturnNormal = true;
+  }
+
+  if (returnNormalOnP)
+    return [isInside, canReturnNormal ? closestNormal : null];
+  return isInside;
+}
+
+export function isSegContained(
+  seg: Segment,
+  normal: boolean,
+  segments: Segment[],
+  normals: boolean[]
+) {
+  const vi: Vec2 = [seg[0], seg[1]];
+  const vj: Vec2 = [seg[2], seg[3]];
+
+  // If the mid is ON the closest segment line, then that means the normals
+  //  are on the same span (lest the segments concerned intersect and are so
+  //  handled before this point).
+  // Thus, if one is a NEGATIVE constant times the other, then we should consider
+  //  the segments contained, and if POSITIVE then this one not contained (the
+  //  other will probably be deleted either way).
+
+  const mid: Vec2 = [(vi[0] + vj[0]) / 2, (vi[1] + vj[1]) / 2];
+  const [isInside, otherNormal] = isInsideSolid(mid, segments, normals, true);
+  if (!otherNormal) return isInside;
+  const normal_ = createNormal(seg, normal);
+
+  if (dot(normal_, otherNormal) < 0) return true;
   else return false;
 }
 
@@ -441,33 +494,96 @@ function getIntersection(s1: Segment, s2: Segment): Vec2 {
  * This is done by collecting all vertices from all adjustments of the segment and
  * sorting them, then pairing them up again.
  */
-function combineTriSegPartials(verts: number[]): Segment[] {
-  if (verts.length === 0) return [];
-  else if (verts.length === 4) return [<Segment>verts];
-
-  const XorY = verts[0] !== verts[2] ? 0 : 1;
-  const vertsXInds = verts
-    .filter((_, i) => i % 2 === XorY)
-    .map((el, i) => [el, i]);
-  vertsXInds.sort((a, b) => a[0] - b[0]);
-  let sortedVerts: Vec2[] = vertsXInds.map((el) => [
-    verts[el[1] * 2],
-    verts[el[1] * 2 + 1],
-  ]);
-  // If the first two are duplicates, then we'll have the wrong parity when
-  //  pairing the vertices, and since that probably means the last two are
-  //  also duplicates, we remove one of both.
-  // IMP: There may be cases where this fails! More thorough testing is due.
-  if (
-    sortedVerts[0][0] === sortedVerts[1][0] &&
-    sortedVerts[0][1] === sortedVerts[1][1]
-  )
-    sortedVerts = sortedVerts.slice(1, -1);
-
-  const final: Segment[] = [];
-  for (let i = 0; i < sortedVerts.length / 2; i++) {
-    final.push([...sortedVerts[i * 2], ...sortedVerts[i * 2 + 1]]);
+function combineTriSegPartials(
+  segs: Segment[],
+  fullSeg_: Segment,
+  kwargs: { verbose?: boolean; flipNormal?: () => void } = {}
+) {
+  kwargs.flipNormal ??= () => undefined;
+  if (segs.length === 0) return [];
+  else if (segs.length === 1) return segs;
+  const XorY = fullSeg_[0] !== fullSeg_[2] ? 0 : 1;
+  const sortSegment = (seg: Segment, runFlipNormal = false): Segment => {
+    if (seg[XorY] < seg[XorY + 2]) return seg;
+    else {
+      if (runFlipNormal) kwargs.flipNormal!();
+      return [seg[2], seg[3], seg[0], seg[1]];
+    }
+  };
+  // IMP: THE NORMALS DEPEND ON THE ORDER OF THEIR SEGMENT!!!
+  //      Ordering all the vertices into "ascending order" here will have unforseen consequences.
+  const fullSeg: Segment = sortSegment(fullSeg_, true);
+  // There is a hidden assumption here as well that the input won't have duplicates
+  const startSegs: Segment[] = [];
+  const endSegs: Segment[] = [];
+  for (const seg_ of segs) {
+    const seg = sortSegment(seg_);
+    if (lEq(seg, fullSeg)) continue;
+    if (fEq(seg[0], seg[2]) && fEq(seg[1], seg[3])) continue;
+    if (
+      fEq(seg[0], fullSeg[0]) &&
+      fEq(seg[1], fullSeg[1]) &&
+      !segmentInList(seg, startSegs)
+    )
+      startSegs.push(seg);
+    else if (
+      fEq(seg[2], fullSeg[2]) &&
+      fEq(seg[3], fullSeg[3]) &&
+      !segmentInList(seg, endSegs)
+    )
+      endSegs.push(seg);
   }
+  if (startSegs.length + endSegs.length === 0) return [];
+  if (Math.abs(startSegs.length - endSegs.length) > 1)
+    // prettier-ignore
+    throw new Error(`Unexpected length difference between startSegs (${startSegs.length}) and endSegs ${endSegs.length}`);
+  const segsLength = startSegs.length + endSegs.length;
+
+  startSegs.sort((a, b) => a[XorY] - b[XorY]);
+  endSegs.sort((a, b) => a[XorY] - b[XorY]);
+
+  // `stranded`: If BOTH ends from fullSeg won't show up in the final body of segments
+  const stranded =
+    startSegs.length === endSegs.length &&
+    startSegs[0][XorY + 2] > endSegs[endSegs.length - 1][XorY];
+  const startGap = stranded || startSegs.length === endSegs.length - 1;
+  let isGap = startGap;
+  const final: Segment[] = [];
+  /**
+  0 -> fullSeg[0/1]
+  1 -> startSegs[0][2/3]
+  2 -> endSegs[-1][0/1]
+  3 -> startSegs[1][2/3]
+  4 -> endSegs[-2][0/1]
+  ...
+  segs.length + 1 -> fullSeg[2/3]
+   */
+  const getVertAtIndex = (i: number): Vec2 => {
+    if (i === 0) return [fullSeg[0], fullSeg[1]];
+    else if (i === segsLength + 1) return [fullSeg[2], fullSeg[3]];
+    else {
+      const index =
+        i % 2 === Number(!startGap)
+          ? Math.floor(i / 2)
+          : endSegs.length - Math.floor((i + 1) / 2);
+      // console.log(i, index);
+      return i % 2 === Number(!startGap)
+        ? [startSegs[index][2], startSegs[index][3]]
+        : [endSegs[index][0], endSegs[index][1]];
+    }
+  };
+  for (let i = 0; i < segsLength + 1; i++) {
+    if (isGap) {
+      isGap = false;
+      continue;
+    }
+    final.push([...getVertAtIndex(i), ...getVertAtIndex(i + 1)]);
+    isGap = true;
+  }
+  if (kwargs.verbose) console.log("--------------------");
+  if (kwargs.verbose)
+    console.log(startSegs, endSegs, fullSeg, stranded, startGap);
+  if (kwargs.verbose) console.log(final);
   return final;
 }
 
@@ -483,23 +599,21 @@ function combineTriSegPartials(verts: number[]): Segment[] {
 //  line segments that are associated with the original triangle at that index.
 export type LineSegmentsReference = Segment[][];
 
+interface ttlsOpts {
+  prefillLineSegs?: LineSegmentsReference;
+  prefillLineSegsNorms?: boolean[][];
+  verbose?: boolean;
+}
+
 export function trianglesToLineSegments(bounds: SolidObjs): Segment[];
 // prettier-ignore
-export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: {normals?: false, triangleRef?: false}): Segment[]
+export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: ttlsOpts & {normals?: false, triangleRef?: false}): Segment[];
 // prettier-ignore
-export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: {normals?: false, triangleRef?: false, prefillLineSegs: LineSegmentsReference, prefillLineSegsNorms: boolean[][]}): Segment[]
+export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: ttlsOpts & {normals?: false, triangleRef: true}): LineSegmentsReference;
 // prettier-ignore
-export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: {normals?: false, triangleRef: true}): LineSegmentsReference
+export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: ttlsOpts & {normals: true, triangleRef?: false}): [segments: Segment[], normals: boolean[]];
 // prettier-ignore
-export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: {normals?: false, triangleRef: true, prefillLineSegs: LineSegmentsReference, prefillLineSegsNorms: boolean[][]}): LineSegmentsReference
-// prettier-ignore
-export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: {normals: true, triangleRef?: false}): [segments: Segment[], normals: boolean[]]
-// prettier-ignore
-export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: {normals: true, triangleRef?: false, prefillLineSegs: LineSegmentsReference, prefillLineSegsNorms: boolean[][]}): [segments: Segment[], normals: boolean[]]
-// prettier-ignore
-export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: {normals: true, triangleRef: true}): [segments: LineSegmentsReference, normals: boolean[][]]
-// prettier-ignore
-export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: {normals: true, triangleRef: true, prefillLineSegs: LineSegmentsReference, prefillLineSegsNorms: boolean[][]}): [segments: LineSegmentsReference, normals: boolean[][]]
+export function trianglesToLineSegments(bounds: SolidObjs, returnOpts: ttlsOpts & {normals: true, triangleRef: true}): [segments: LineSegmentsReference, normals: boolean[][]];
 
 /**
  * Turns a list of triangles into a list of line segments, which is processed so that
@@ -517,6 +631,7 @@ export function trianglesToLineSegments(
     triangleRef?: boolean;
     prefillLineSegs?: LineSegmentsReference;
     prefillLineSegsNorms?: boolean[][];
+    verbose?: boolean;
   }
 ) {
   opts ??= { normals: false, triangleRef: false };
@@ -529,6 +644,7 @@ export function trianglesToLineSegments(
     throw new ReferenceError(`prefillLineSegs not same length as prefillLineSegsNorms `+
                              `(${opts.prefillLineSegs.length} !== ${opts.prefillLineSegsNorms.length})`);
   const preNumGroups = opts.prefillLineSegsNorms.length;
+  if (opts.verbose) console.log(preNumGroups);
   // debugger;
 
   // All we need is a boolean indicating if we're going anti-clockwise or clockwise
@@ -551,6 +667,11 @@ export function trianglesToLineSegments(
       segmentInList([...v3, ...v1], outSegments)
     )
       continue;
+    const triVertPerms = [
+      [v1, v2, v3],
+      [v2, v3, v1],
+      [v3, v1, v2],
+    ];
 
     // No need for deepcopy, since we never modify the triangles themselves here (only add/remove from the list)
     const outSegments_: Segment[] = [...outSegments];
@@ -566,7 +687,7 @@ export function trianglesToLineSegments(
     // This collects all the adjustments the following loop makes to the triangle segments
     //  for intersections with other segments, so that we may instill them afterwards.
     // prettier-ignore
-    const triSegPartials: [v1: number[], v2: number[], v3: number[]] = [[], [], []];
+    const triSegPartials: [v1: Segment[], v2: Segment[], v3: Segment[]] = [[], [], []];
     // prettier-ignore
     const triSegNormals: [v1: boolean, v2: boolean, v3: boolean] = [false, false, false];
 
@@ -582,11 +703,7 @@ export function trianglesToLineSegments(
       }
 
       // Check for intersections in the line segments of the triangle
-      for (const [k, [vi, vj, vOther]] of [
-        [v1, v2, v3],
-        [v2, v3, v1],
-        [v3, v1, v2],
-      ].entries()) {
+      for (const [k, [vi, vj, vOther]] of triVertPerms.entries()) {
         const triSeg: Segment = [...vi, ...vj];
         const seg: Segment = outSegments[j];
         if (isIntersecting(triSeg, seg)) {
@@ -604,7 +721,7 @@ export function trianglesToLineSegments(
             segNormal
           );
 
-          triSegPartials[k].push(...adjusted[0]);
+          triSegPartials[k].push(adjusted[0]);
           outSegments.push(adjusted[1]);
           triSegNormals[k] = triSegNormal;
           outSegmentNormals.push(segNormal);
@@ -614,11 +731,20 @@ export function trianglesToLineSegments(
     }
 
     for (let k = 0; k < 3; k++) {
-      const segments = combineTriSegPartials(triSegPartials[k]);
+      const segments = combineTriSegPartials(
+        triSegPartials[k],
+        [...triVertPerms[k][0], ...triVertPerms[k][1]],
+        {
+          verbose: false,
+          flipNormal: () => {
+            triSegNormals[k] = !triSegNormals[k];
+          },
+        }
+      );
 
       outSegments.push(...segments);
       outSegmentNormals.push(...Array(segments.length).fill(triSegNormals[k]));
-      triInds.push(...Array(segments.length).fill(i));
+      triInds.push(...Array(segments.length).fill(i + preNumGroups));
     }
 
     // Remove segments on the remove list, since they're inside the new triangle,
@@ -637,9 +763,11 @@ export function trianglesToLineSegments(
     ].entries()) {
       // Add in the full, untouched segments of the triangle, if they're outside the current solids.
       if (excludeFullTriSeg.includes(k)) continue;
-      // We query the midpoint here, because if we pick one of the ends we may get false positives.
-      const mid: Vec2 = [(vi[0] + vj[0]) / 2, (vi[1] + vj[1]) / 2];
-      if (isInsideSolid(mid, outSegments_, outSegmentNormals_)) {
+
+      const normal = findNormal(vi, vj, vOther);
+      if (
+        isSegContained([...vi, ...vj], normal, outSegments_, outSegmentNormals_)
+      ) {
         fullTriSegsContained++;
         continue;
       }
@@ -665,8 +793,6 @@ export function trianglesToLineSegments(
       out[triInds[i]].push(outSegments[i]);
       outNormals[triInds[i]].push(outSegmentNormals[i]);
     }
-    out = [...opts.prefillLineSegs, ...out];
-    outNormals = [...opts.prefillLineSegsNorms, ...outNormals];
   } else {
     out = outSegments;
     outNormals = outSegmentNormals;
@@ -694,28 +820,56 @@ export function basicTrianglesToLineSegments(bounds: SolidObjs) {
 
 export function cleanupLineSegments(segments: Segment[]): Segment[];
 // prettier-ignore
+export function cleanupLineSegments(segments: LineSegmentsReference): LineSegmentsReference;
+// prettier-ignore
 export function cleanupLineSegments(segments: Segment[], normals: boolean[]): [out: Segment[], outNorms: boolean[]];
+// prettier-ignore
+export function cleanupLineSegments(segments: LineSegmentsReference, normals: boolean[][]): [out: LineSegmentsReference, outNorms: boolean[][]];
 
 /**
  * Cleans up a list of line segments, and may reflect the changes on the associated normals (boolean list).
  * - Remove segments that start and end at the same point
  * - Remove duplicate segments
  */
-export function cleanupLineSegments(segments: Segment[], normals?: boolean[]) {
-  let out: Segment[] = Array(segments.length);
-  let outNorms: boolean[] = Array(normals ? normals.length : 0);
+export function cleanupLineSegments(
+  segments: Segment[] | LineSegmentsReference,
+  normals?: boolean[] | boolean[][]
+) {
+  if (segments.length === 0) return normals ? [segments, normals] : segments;
+  const isTriRef = (a: typeof segments): a is LineSegmentsReference =>
+    typeof a[0][0] !== "number";
+  const segments_ = isTriRef(segments) ? segments.flat() : segments;
+  // prettier-ignore
+  const normals_ = isTriRef(segments) ? (<boolean[][] | undefined>normals)?.flat() : <boolean[] | undefined>normals;
+  let out: Segment[] = Array(segments_.length);
+  let outNorms: boolean[] = Array(normals_ ? normals_.length : 0);
 
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-    const norm = normals?.[i];
+  for (let i = 0; i < segments_.length; i++) {
+    const seg = segments_[i];
+    const norm = normals_?.[i];
+
     if (seg[0] === seg[2] && seg[1] === seg[3]) continue;
     if (segmentInList(seg, out)) continue;
+
     out[i] = seg;
     if (norm) outNorms[i] = norm;
   }
   out = out.filter((n) => n);
   outNorms = outNorms.filter((n) => n || !n);
 
+  if (isTriRef(segments)) {
+    const triInds = segments.map((el, i) => Array(el.length).fill(i)).flat();
+    // prettier-ignore
+    const newOut: LineSegmentsReference = Array.from(Array(segments.length), () => []);
+    // prettier-ignore
+    const newOutNorms: boolean[][] = Array.from(Array(segments.length), () => []);
+    for (let i = 0; i < triInds.length; i++) {
+      newOut[triInds[i]].push(segments_[i]);
+      if (normals) newOutNorms[triInds[i]].push(normals_![i]);
+    }
+    if (normals) return [newOut, newOutNorms];
+    else return newOut;
+  }
   if (normals) return [out, outNorms];
   else return out;
 }

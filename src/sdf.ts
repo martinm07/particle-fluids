@@ -1,16 +1,12 @@
 import * as THREE from "three";
 import { GPUCompute } from "./GPUCompute";
 import { Vec2, Segment } from "./helper";
-import {
-  LineSegmentsReference,
-  cleanupLineSegments,
-  segmentInList,
-} from "./boundsHelper";
+import { LineSegmentsReference, segmentInList } from "./boundsHelper";
 import ConvexHullGrahamScan from "graham_scan";
 
 import updateSDFShader from "./shaders/create-sdf.glsl";
-import moveSegmentSDFShader from "./shaders/move-segments-sdf.glsl";
-import moveSegmentsSDFShader2 from "./shaders/_DEPR_move-segments-sdf.glsl";
+import moveSegmentSDFShader from "./shaders/move-segments-sdf2.glsl";
+// import moveSegmentsSDFShader2 from "./shaders/_DEPR_move-segments-sdf.glsl";
 
 const NUL = Number.parseFloat(import.meta.env.VITE_NUL);
 
@@ -22,6 +18,7 @@ IMP: First apply this.translate, then this.scale:
 export class SDF {
   width: number;
   height: number;
+  boundaryMargin: number;
 
   bounds?: LineSegmentsReference;
   segmentNormals?: boolean[][];
@@ -35,10 +32,15 @@ export class SDF {
 
   constructor(
     renderer: THREE.WebGLRenderer,
-    params: { width: number; height: number } = { width: 200, height: 200 }
+    params: { width: number; height: number; boundaryMargin: number } = {
+      width: 200,
+      height: 200,
+      boundaryMargin: 0.5,
+    }
   ) {
     this.width = params.width;
     this.height = params.height;
+    this.boundaryMargin = params.boundaryMargin;
 
     this.gpuc = new GPUCompute(
       [this.width, this.height],
@@ -49,17 +51,18 @@ export class SDF {
         type: THREE.FloatType,
       }
     );
+    this.gpuc.updateUniform("boundaryMargin", params.boundaryMargin);
     this.texture = this.gpuc.renderTarget.texture;
 
-    this.movegpuc = new GPUCompute(
-      [this.width, this.height],
-      moveSegmentsSDFShader2,
-      renderer,
-      [],
-      {
-        type: THREE.FloatType,
-      }
-    );
+    // this.movegpuc = new GPUCompute(
+    //   [this.width, this.height],
+    //   moveSegmentsSDFShader2,
+    //   renderer,
+    //   [],
+    //   {
+    //     type: THREE.FloatType,
+    //   }
+    // );
 
     this.movegpuc = new GPUCompute(
       [this.width, this.height],
@@ -70,6 +73,7 @@ export class SDF {
         type: THREE.FloatType,
       }
     );
+    this.movegpuc.updateUniform("boundaryMargin", params.boundaryMargin);
   }
 
   isInitialized(): this is SDFIsInitialized {
@@ -90,10 +94,10 @@ export class SDF {
       const vertsY_ =
         vertsY ?? this.bounds.flat(2).filter((_, i) => i % 2 === 1);
 
-      const top = Math.max.apply(null, vertsY_);
-      const right = Math.max.apply(null, vertsX_);
-      const bottom = Math.min.apply(null, vertsY_);
-      const left = Math.min.apply(null, vertsX_);
+      const top = Math.max.apply(null, vertsY_) + this.boundaryMargin;
+      const right = Math.max.apply(null, vertsX_) + this.boundaryMargin;
+      const bottom = Math.min.apply(null, vertsY_) - this.boundaryMargin;
+      const left = Math.min.apply(null, vertsX_) - this.boundaryMargin;
 
       // coordinates go from [0.5 -> 199.5, 0.5 -> 199.5]
       //  where (0.5, 0.5) is bottom left
@@ -119,10 +123,8 @@ export class SDF {
     if (segmentNormals) this.segmentNormals = segmentNormals;
 
     if (bounds || segmentNormals) {
-      const [bounds_, normals_] = cleanupLineSegments(
-        this.bounds!.flat(),
-        this.segmentNormals!.flat()
-      );
+      const bounds_ = this.bounds!.flat();
+      const normals_ = this.segmentNormals!.flat();
       // It's important that we flatten these arrays
       this.gpuc.updateUniform("bounds", bounds_.flat());
       this.gpuc.updateUniform("segNormals", normals_);
@@ -213,33 +215,36 @@ export class SDF {
     }
 
     // B1 is always before B2, and A2 is always before A1
-    const preBulgeInds = this.AToBInds(
-      ABinds.A1!,
-      ABinds.B1!,
-      hull_.length,
-      true
-    );
+    // const preBulgeInds = this.AToBInds(
+    //   ABinds.A1!,
+    //   ABinds.B1!,
+    //   hull_.length,
+    //   true
+    // );
     const postBulgeInds = this.AToBInds(
       ABinds.A2!,
       ABinds.B2!,
       hull_.length,
       false
     );
+    // console.log("------------");
+    // console.log(this.bounds[id], newLoc);
+    // console.log(hull_, preBulgeInds, postBulgeInds);
 
-    const preBulge = preBulgeInds.flatMap((ind) => [
-      hull_[ind].x,
-      hull_[ind].y,
-    ]);
+    // const preBulge = preBulgeInds.flatMap((ind) => [
+    //   hull_[ind].x,
+    //   hull_[ind].y,
+    // ]);
     const postBulge = postBulgeInds.flatMap((ind) => [
       hull_[ind].x,
       hull_[ind].y,
     ]);
-    preBulge.push(NUL);
+    // preBulge.push(NUL);
     postBulge.push(NUL);
     // console.log(hull_, ABinds, preBulge, postBulge);
 
     this.movegpuc.updateUniform("areaVerts", convexHull);
-    this.movegpuc.updateUniform("preBulge", preBulge);
+    // this.movegpuc.updateUniform("preBulge", preBulge);
     this.movegpuc.updateUniform("postBulge", postBulge);
 
     this.movegpuc.updateUniform("oldScale", this.scale);
@@ -255,6 +260,10 @@ export class SDF {
 
     this.texture = this.movegpuc.compute(true)!;
     return this.movegpuc.renderTarget.texture;
+  }
+
+  getSize(): [w: number, h: number] {
+    return [this.width, this.height];
   }
 }
 

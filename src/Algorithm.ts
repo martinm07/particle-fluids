@@ -19,9 +19,12 @@ import {
   initTexture,
   texCoords,
   trianglesEqual,
-  visualiseTexture,
 } from "./helper";
-import { LineSegmentsReference, trianglesToLineSegments } from "./boundsHelper";
+import {
+  LineSegmentsReference,
+  cleanupLineSegments,
+  trianglesToLineSegments,
+} from "./boundsHelper";
 
 const NUL = Number.parseFloat(import.meta.env.VITE_NUL);
 
@@ -172,85 +175,21 @@ export class Algorithm {
     this.initCreateInputs();
 
     this.bounds = bounds;
-    const [lineBounds, segmentNormals] = trianglesToLineSegments(bounds, {
-      normals: true,
-      triangleRef: true,
-    });
+    const [lineBounds, segmentNormals] = cleanupLineSegments(
+      ...trianglesToLineSegments(bounds, {
+        normals: true,
+        triangleRef: true,
+      })
+    );
     const lineBounds_ = lineBounds.flat(2);
     lineBounds_.push(NUL);
 
     this.sdf = new SDF(this.renderer, {
       width: 200,
       height: 200,
+      boundaryMargin: this.params.BOUNDARY_MARGIN,
     });
     this.sdf.returnSDF(lineBounds, segmentNormals);
-
-    /* DEBUGGING */
-    const canvasContainer = document.getElementById("test-container")!;
-    const vizSDF = () => {
-      if (!this.isInitialized()) return;
-
-      const boundsTest: SolidObjs = [
-        [-1, 1, 1, 1, 0, -0.5],
-        [-1, -1, 1, -1, 0, 0.5],
-        [-0.333, 0.75, 0.333, 0.75, 0.2, 1.3],
-        [-0.5, 0, 0.5, 0, 0, -1],
-      ];
-      const [lineBounds, segmentNormals] = trianglesToLineSegments(boundsTest, {
-        normals: true,
-        triangleRef: true,
-      });
-
-      visualiseTexture(
-        canvasContainer,
-        (renderer) => {
-          const sdf = new SDF(renderer, {
-            width: 200,
-            height: 200,
-          });
-          sdf.returnSDF(lineBounds, segmentNormals);
-          // Move triange at index 2
-          const allSegs = trianglesToLineSegments(
-            [[-0.333, 0.75, 0.333, 0.75, -0.5, 2]],
-            {
-              triangleRef: true,
-              prefillLineSegs: lineBounds,
-              prefillLineSegsNorms: segmentNormals,
-            }
-          );
-          const newTri = allSegs[allSegs.length - 1];
-          sdf.moveSegmentGroup(2, newTri);
-          // Read data (it's possible to read floating-point textures??)
-          const buffer = new Float32Array(200 * 200 * 4);
-          renderer.readRenderTargetPixels(
-            sdf.movegpuc.renderTarget,
-            0,
-            0,
-            200,
-            200,
-            buffer
-          );
-          console.log(buffer);
-
-          return sdf.returnSDF();
-        },
-        `uniform sampler2D SDF;
-
-        void main() {
-            float index = 0.0 + (gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * resolution.x;
-
-            vec2 uv = gl_FragCoord.xy / resolution.xy;
-            vec4 info = texture2D(SDF, uv).xyzw;
-
-            float max = 1.0;
-            info.x = pow(1.0 + info.x, 1.0) - 1.0;
-            if (info.x < 0.0) gl_FragColor = vec4(-info.x / max, 0.0, 0.0, 1.0);
-            else gl_FragColor  = vec4(0.0, 0.0, info.x / max, 1.0);
-        }`,
-        [this.sdf.width, this.sdf.height]
-      );
-    };
-    // setTimeout(vizSDF);
 
     this.gpuComputes[1] = new GPUCompute(
       this.P * 2,
@@ -671,6 +610,7 @@ export class Algorithm {
     this.gpuComputes.forEach((gpuc) => gpuc.updateVaryings());
 
     this.gpuComputes[5].texInputs.X = this.positions;
+    this.gpuComputes[5].updateUniform("lineBounds", this.sdf.bounds!.flat(2));
     this.gpuComputes[5].texInputs.SDF = this.sdf.returnSDF();
     this.gpuComputes[5].updateUniform("SDFtranslate", this.sdf.translate);
     this.gpuComputes[5].updateUniform("SDFscale", this.sdf.scale);
@@ -691,9 +631,10 @@ export class Algorithm {
         return [
           arr.filter(
             (_, i) =>
-              arr[Math.floor(i / 2) * 2] < -20 ||
-              arr[Math.floor(i / 2) * 2] > 20 ||
-              arr[Math.floor(i / 2) * 2 + 1] < -20
+              arr[Math.floor(i / 2) * 2] < -50 ||
+              arr[Math.floor(i / 2) * 2] > 50 ||
+              arr[Math.floor(i / 2) * 2 + 1] < -50 ||
+              arr[Math.floor(i / 2) * 2 + 1] > 50
           ),
           arr.filter((el) => isNaN(el) || !isFinite(el)).length,
         ];
@@ -710,9 +651,10 @@ export class Algorithm {
 
     this.debug = false;
 
-    this.bounds = this.newBounds;
-    if (this.boundsChanged)
+    if (this.boundsChanged) {
+      this.bounds = this.newBounds;
       this.sdf.returnSDF(updatedLineBounds, updatedNormals);
+    }
     this.boundsChanged = false;
 
     return this.positions;
@@ -724,8 +666,10 @@ export class Algorithm {
 
   updateBounds(bounds: SolidObjs) {
     if (!this.isInitialized()) throw new Error("Algorithm not initialized");
-    if (bounds.length !== this.bounds.length)
+    if (bounds.length !== this.bounds.length) {
+      console.log(bounds, this.bounds);
       throw new Error("updateBounds cannot add or remove bounds!");
+    }
 
     this.newBounds = bounds;
   }
@@ -737,23 +681,22 @@ export class Algorithm {
     if (!this.isInitialized()) throw new Error("Algorithm not initialized");
 
     const differentIndices: number[] = [];
-    const differentBounds = this.newBounds.filter((triangle, i) => {
-      if (!trianglesEqual(this.bounds[i], triangle)) {
-        differentIndices.push(i);
-        return true;
-      } else return false;
+    this.newBounds.forEach((triangle, i) => {
+      if (!trianglesEqual(this.bounds[i], triangle)) differentIndices.push(i);
     });
-    if (differentBounds.length === 0) return [[], []];
+    if (differentIndices.length === 0) return [[], []];
     this.boundsChanged = true;
-    console.log(differentIndices, differentBounds);
 
-    const [allSegments, allNormals] = trianglesToLineSegments(differentBounds, {
-      normals: true,
-      triangleRef: true,
-      prefillLineSegs: this.sdf.bounds!,
-      prefillLineSegsNorms: this.sdf.segmentNormals!,
-    });
-    const differentSegments = allSegments.slice(allSegments.length - 1);
+    const [allSegments, allNormals] = cleanupLineSegments(
+      ...trianglesToLineSegments(this.newBounds, {
+        normals: true,
+        triangleRef: true,
+      })
+    );
+    const differentSegments = allSegments.filter((_, i) =>
+      differentIndices.includes(i)
+    );
+    // console.log(allSegments, differentSegments, this.sdf.bounds!);
     for (let i = 0; i < differentSegments.length; i++)
       this.sdf.moveSegmentGroup(differentIndices[i], differentSegments[i]);
     return [allSegments, allNormals];

@@ -345,13 +345,11 @@ export function trianglesEqual(tri1: Triangle, tri2: Triangle) {
 
 export function visualiseTexture(
   canvasContainer: HTMLElement,
-  generateTex: (renderer: THREE.WebGLRenderer) => THREE.Texture,
-  shader: string,
-  dims: [width: number, height: number]
+  generateTex: (
+    renderer: THREE.WebGLRenderer
+  ) => [t: THREE.Texture, w: number, h: number],
+  shader: string
 ) {
-  const sizeX = dims[0];
-  const sizeY = dims[1];
-
   const renderer = new THREE.WebGLRenderer();
   canvasContainer.appendChild(renderer.domElement);
 
@@ -361,7 +359,7 @@ export function visualiseTexture(
   scene.add(camera);
 
   const matUniforms: { [key: string]: { value: any } } = {
-    SDF: { value: null },
+    tex: { value: null },
   };
   const material = new THREE.ShaderMaterial({
     uniforms: matUniforms,
@@ -369,9 +367,6 @@ export function visualiseTexture(
     fragmentShader: shader,
     side: THREE.DoubleSide,
   });
-  // prettier-ignore
-  material.defines!.resolution = 
-    `vec2(${sizeX.toFixed(1)}, ${sizeY.toFixed(1)})`;
 
   const geometry = new THREE.PlaneGeometry(2, 2);
   const mesh = new THREE.Mesh(geometry, material);
@@ -382,11 +377,15 @@ export function visualiseTexture(
 
   ///////////
 
-  matUniforms["SDF"].value = generateTex(renderer);
+  const [tex, width, height] = generateTex(renderer);
+  matUniforms["tex"].value = tex;
 
   //////////
 
-  renderer.setSize(sizeX, sizeY, false);
+  // prettier-ignore
+  material.defines!.resolution = `vec2(${width.toFixed(1)}, ${height.toFixed(1)})`;
+  renderer.setSize(width, height, false);
+
   const render = () => {
     renderer.render(scene, camera);
     requestAnimationFrame(render);
@@ -439,3 +438,7 @@ export function inverseTransform(matrix: Transformation): Transformation {
   const invMat: Transformation = [matrix[3], -matrix[1], -matrix[2], matrix[0]];
   return <Transformation>invMat.map((el) => determinantReciprocal * el);
 }
+
+export const lEq = (l1: unknown[], l2: unknown[]) =>
+  l1.every((el, i) => el === l2[i]);
+export const fEq = (f1: number, f2: number) => Math.abs(f1 - f2) < 0.000001;

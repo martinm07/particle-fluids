@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import vertexShaderCode from "./shaders/vertex-shader.glsl";
 import fragmentShaderCode from "./shaders/fragment-shader.glsl";
-import { ParticleGeometry } from "./visuals/ParticleGeometry";
+import { ParticleGeometry, shapeEquals } from "./visuals/ParticleGeometry";
 import { CanvasVisual } from "./visuals/CanvasVisuals";
 import {
   SolidObjs,
@@ -9,7 +9,12 @@ import {
   Vec2,
   applyTransform,
   inverseTransform,
+  lEq,
 } from "./helper";
+import { ParticleVisual } from "./visuals/ParticleVisuals";
+import { FluidVisual } from "./visuals/FluidVisuals";
+import clone_ from "clone";
+const cloneDeep = <T>(val: T): T => clone_(val, false);
 
 interface OptParticleRenderParamsSetter {
   EDGE_POINT?: Vec2;
@@ -94,9 +99,9 @@ export class ParticleRender {
   aspect: number;
   scale: number = 1;
   pixelRatio: number = 1;
-  firstRender: boolean = true;
 
   particleUniforms: { [key: string]: { value: any } };
+  nParticles: number;
   copies: number;
   params: ParticleRenderParams;
   canvasVisual: CanvasVisual;
@@ -108,7 +113,8 @@ export class ParticleRender {
     params: OptParticleRenderParamsSetter = {}
   ) {
     this.params = new ParticleRenderParams(params);
-    this.canvasVisual = canvasVisual;
+    this.nParticles = nParticles;
+    this.canvasVisual = cloneDeep(canvasVisual);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.localClippingEnabled = true;
@@ -116,8 +122,8 @@ export class ParticleRender {
     const height = canvasContainer.clientHeight;
 
     this.renderer.setClearColor(
-      canvasVisual.backgroundColor.color,
-      canvasVisual.backgroundColor.alpha
+      this.canvasVisual.backgroundColor.color,
+      this.canvasVisual.backgroundColor.alpha
     );
     canvasContainer.appendChild(this.renderer.domElement);
 
@@ -142,55 +148,16 @@ export class ParticleRender {
       iTime: { value: 0 },
     };
 
-    this.copies = canvasVisual.fluidCopies.length;
-    for (let i = 0; i < this.copies; i++) {
-      const fluidVisual = canvasVisual.fluidCopies[i];
-      fluidVisual.invTransform = inverseTransform(fluidVisual.transform);
-      const particleVisual = fluidVisual.particleVisual;
-      refreshShaderCode();
-
-      const isColorDynamic = typeof particleVisual.color === "string";
-      const isSizeDynamic = typeof particleVisual.color === "string";
-
-      injectFuncBody("vertex", "sizeFunc", particleVisual.size);
-      insertBooleanValue("vertex", "isSizeDynamic", isSizeDynamic);
-      if (!isSizeDynamic) {
-        this.particleUniforms["size"] = { value: particleVisual.size };
-      }
-
-      injectFuncBody("fragment", "colorFunc", particleVisual.color);
-      insertBooleanValue("fragment", "isColorDynamic", isColorDynamic);
-      if (!isColorDynamic) {
-        this.particleUniforms["color"] = { value: particleVisual.color };
-      }
-
-      const material = new THREE.ShaderMaterial({
-        uniforms: {
-          ...this.particleUniforms,
-          translate: { value: fluidVisual.translate },
-          transform: { value: fluidVisual.transform },
-        },
-        vertexShader: shaderCode.vertex,
-        fragmentShader: shaderCode.fragment,
-        side: THREE.DoubleSide,
-        clipping: true,
-      });
-
-      const geometry = new ParticleGeometry(nParticles, particleVisual.shape);
-      const particleMesh = new THREE.Mesh(geometry, material);
-
-      particleMesh.scale.set(this.scale, this.scale, 1);
-
-      particleMesh.matrixAutoUpdate = false;
-      particleMesh.updateMatrix();
-      this.meshes.push(particleMesh);
-      this.scene.add(particleMesh);
-    }
+    this.copies = this.canvasVisual.fluidCopies.length;
+    for (let i = 0; i < this.copies; i++)
+      this.addFluidVisual(this.canvasVisual.fluidCopies[i]);
 
     // This refreshes the internal width/height to be the CSS width/height
     //  (multiplied by the device pixel ratio)
     canvas.style.removeProperty("height");
     canvas.style.removeProperty("width");
+
+    this.updateSize();
   }
 
   // https://stackoverflow.com/a/45046955/11493659
@@ -256,6 +223,151 @@ export class ParticleRender {
     }
   }
 
+  updateParticleVisual(particleVisual: ParticleVisual, fluidCopyID: number) {
+    const oldVis = this.canvasVisual.fluidCopies[fluidCopyID].particleVisual;
+    const newVis = particleVisual;
+
+    const geometry = <ParticleGeometry>this.meshes[fluidCopyID].geometry;
+    const mat = <THREE.ShaderMaterial>this.meshes[fluidCopyID].material;
+    let matNeedsUpdate = false;
+
+    if (
+      !(typeof newVis === "string" && newVis === oldVis) &&
+      !(
+        newVis instanceof THREE.Color &&
+        oldVis instanceof THREE.Color &&
+        newVis.equals(oldVis)
+      )
+    ) {
+      const isColorDynamic = typeof particleVisual.color === "string";
+      insertBooleanValue("fragment", "isColorDynamic", isColorDynamic);
+      if (isColorDynamic)
+        injectFuncBody("fragment", "colorFunc", particleVisual.color);
+      else mat.uniforms.color.value = particleVisual.color;
+      matNeedsUpdate = true;
+    }
+    if (oldVis.size !== newVis.size) {
+      const isSizeDynamic = typeof particleVisual.color === "string";
+      insertBooleanValue("vertex", "isSizeDynamic", isSizeDynamic);
+      if (isSizeDynamic)
+        injectFuncBody("vertex", "sizeFunc", particleVisual.size);
+      else mat.uniforms.size.value = particleVisual.size;
+      matNeedsUpdate = true;
+    }
+    if (!shapeEquals(oldVis.shape, newVis.shape)) {
+      geometry.updateShape(particleVisual.shape);
+      matNeedsUpdate = true;
+    }
+
+    this.canvasVisual.fluidCopies[fluidCopyID].particleVisual =
+      cloneDeep(particleVisual);
+
+    mat.needsUpdate = matNeedsUpdate;
+  }
+
+  updateFluidVisual(fluidVisual: FluidVisual, fluidCopyID: number) {
+    const oldVis = this.canvasVisual.fluidCopies[fluidCopyID];
+    const newVis = fluidVisual;
+
+    const mat = <THREE.ShaderMaterial>this.meshes[fluidCopyID].material;
+    let matNeedsUpdate = false;
+
+    if (!lEq(oldVis.transform, newVis.transform)) {
+      mat.uniforms.translate.value = fluidVisual.transform;
+      fluidVisual.invTransform = inverseTransform(fluidVisual.transform);
+      matNeedsUpdate = true;
+    } else {
+      fluidVisual.invTransform = oldVis.invTransform;
+    }
+    if (!lEq(oldVis.translate, newVis.translate)) {
+      mat.uniforms.translate.value = fluidVisual.translate;
+      matNeedsUpdate = true;
+    }
+    this.updateParticleVisual(fluidVisual.particleVisual, fluidCopyID);
+
+    this.canvasVisual.fluidCopies[fluidCopyID] = cloneDeep(fluidVisual);
+
+    mat.needsUpdate = matNeedsUpdate;
+  }
+
+  addFluidVisual(fluidVisual: FluidVisual) {
+    fluidVisual.invTransform = inverseTransform(fluidVisual.transform);
+    const particleVisual = fluidVisual.particleVisual;
+    refreshShaderCode();
+
+    const isColorDynamic = typeof particleVisual.color === "string";
+    const isSizeDynamic = typeof particleVisual.color === "string";
+
+    injectFuncBody("vertex", "sizeFunc", particleVisual.size);
+    insertBooleanValue("vertex", "isSizeDynamic", isSizeDynamic);
+    if (!isSizeDynamic) {
+      this.particleUniforms["size"] = { value: particleVisual.size };
+    }
+
+    injectFuncBody("fragment", "colorFunc", particleVisual.color);
+    insertBooleanValue("fragment", "isColorDynamic", isColorDynamic);
+    if (!isColorDynamic) {
+      this.particleUniforms["color"] = { value: particleVisual.color };
+    }
+
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        ...this.particleUniforms,
+        translate: { value: fluidVisual.translate },
+        transform: { value: fluidVisual.transform },
+      },
+      vertexShader: shaderCode.vertex,
+      fragmentShader: shaderCode.fragment,
+      side: THREE.DoubleSide,
+      clipping: true,
+    });
+
+    const geometry = new ParticleGeometry(
+      this.nParticles,
+      particleVisual.shape
+    );
+    const particleMesh = new THREE.Mesh(geometry, material);
+
+    particleMesh.scale.set(this.scale, this.scale, 1);
+
+    particleMesh.matrixAutoUpdate = false;
+    particleMesh.updateMatrix();
+    this.meshes.push(particleMesh);
+    this.scene.add(particleMesh);
+  }
+
+  destroyFluidVisual(fluidCopyID: number) {
+    const mesh = this.meshes[fluidCopyID];
+    this.scene.remove(mesh);
+    (<THREE.ShaderMaterial>mesh.material).dispose();
+    (<ParticleGeometry>mesh.geometry).dispose();
+  }
+
+  updateCanvasVisual(canvasVisual: CanvasVisual) {
+    const oldVis = this.canvasVisual;
+    const newVis = canvasVisual;
+    let i;
+    for (i = 0; i < oldVis.fluidCopies.length; i++) {
+      if (!canvasVisual.fluidCopies[i]) {
+        // Apply destruction to all following fluidVisuals in oldVisual
+        this.destroyFluidVisual(i);
+        continue;
+      }
+      this.updateFluidVisual(canvasVisual.fluidCopies[i], i);
+    }
+    for (i; i < canvasVisual.fluidCopies.length; i++) {
+      // Create new fluidCopies
+      this.addFluidVisual(canvasVisual.fluidCopies[i]);
+    }
+    if (!oldVis.backgroundColor.equals(newVis.backgroundColor))
+      this.renderer.setClearColor(
+        canvasVisual.backgroundColor.color,
+        canvasVisual.backgroundColor.alpha
+      );
+
+    this.canvasVisual = cloneDeep(canvasVisual);
+  }
+
   setParticleStates(positions: THREE.Texture, velocities: THREE.Texture) {
     this.particleUniforms["texturePosition"].value = positions;
     this.particleUniforms["textureVelocity"].value = velocities;
@@ -265,12 +377,16 @@ export class ParticleRender {
     const newBounds: SolidObjs = Array(bounds.length);
     for (let i = 0; i < bounds.length; i++) {
       const tri = bounds[i];
-      const transform: Transformation = fluidCopyID
-        ? this.canvasVisual.fluidCopies[fluidCopyID].invTransform!
-        : [1, 0, 0, 1];
-      const translate: Vec2 = fluidCopyID
-        ? this.canvasVisual.fluidCopies[fluidCopyID].translate
-        : [0, 0];
+      const transform: Transformation =
+        fluidCopyID !== undefined
+          ? this.canvasVisual.fluidCopies[fluidCopyID].invTransform!
+          : [1, 0, 0, 1];
+      const translate: Vec2 =
+        fluidCopyID !== undefined
+          ? this.canvasVisual.fluidCopies[fluidCopyID].translate
+          : [0, 0];
+
+      // console.log(fluidCopyID, transform, translate);
 
       const translateCanvasCoord = (v: Vec2): Vec2 => {
         // 1) Translate canvas coordinate where 0 is the bottom/left
@@ -280,13 +396,15 @@ export class ParticleRender {
         const vNew: Vec2 = [0, 0];
         const canvas = this.renderer.domElement;
         if (canvas.clientWidth > canvas.clientHeight) {
-          vNew[0] = v[0] * this.aspect - this.aspect / 2;
+          vNew[0] = (v[0] - 0.5) * this.aspect;
           vNew[1] = v[1] - 0.5;
         } else {
           vNew[0] = v[0] - 0.5;
-          vNew[1] = v[1] * this.aspect - this.aspect / 2;
+          vNew[1] = (v[1] - 0.5) / this.aspect;
         }
-        console.log(this.scale, this.aspect);
+        // this.scale is defined to bring this.params.EDGE_POINT into
+        //  the 1x1 length viewing frustrum, and so we want to go the
+        //  opposite way to get to simulation space coordinates.
         vNew[0] /= this.scale;
         vNew[1] /= this.scale;
 
@@ -309,7 +427,7 @@ export class ParticleRender {
   }
 
   render() {
-    this.updateSize(this.firstRender);
+    this.updateSize();
 
     const rect = this.renderer.domElement.getBoundingClientRect();
     if (mousePresent)
@@ -325,7 +443,6 @@ export class ParticleRender {
     );
 
     this.renderer.render(this.scene, this.camera);
-    this.firstRender = false;
   }
 }
 

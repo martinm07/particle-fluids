@@ -137,7 +137,37 @@ void main() {
         float x_y = interpretBytesVector(texture2D(X, getCoord(IDpairY, pRes)).xyzw);
         vec2 x = vec2(x_x, x_y);
 
+        if (debug) {
+            if (mod(computeIndex, 2.0) == 0.0) {
+                gl_FragColor = interpretFloat(newXStar.x);
+            } else {
+                gl_FragColor = interpretFloat(newXStar.y);
+            }
+            return;
+        }
+
         //// Perform collision detection & response on `newXStar`
+
+        vec2 SDFSize = vec2(textureSize(SDF, 0));
+        vec2 sdfCoord = (x + SDFtranslate) * SDFscale;
+        // The "floor(...) + 0.5" ensures we know the behaviour of the sampler lookup;
+        //  [0, 1) -> 0.5
+        vec2 sdfUV = (floor(sdfCoord) + 0.5) / SDFSize;
+        if (!(sdfUV.x < 0.0 || sdfUV.x > 1.0 || sdfUV.y < 0.0 || sdfUV.y > 1.0)) {
+            vec4 x_sdf = texture2D(SDF, sdfUV);
+            float mag = x_sdf.x; vec2 dir = x_sdf.yz; float isBoundsMove = x_sdf.w;
+            if (mag > -boundaryMargin) {
+                vec2 c = (floor(sdfCoord) + 0.5) / SDFscale - SDFtranslate;
+                float cellMag = dot(c - x, dir);
+                newXStar = x + dir * (mag + cellMag + boundaryMargin);
+                if (mod(computeIndex, 2.0) == 0.0) {
+                    gl_FragColor = interpretFloat(newXStar.x);
+                } else {
+                    gl_FragColor = interpretFloat(newXStar.y);
+                }
+                return;
+            }
+        }
 
         LineInfo line1 = lineFromPoints(x, newXStar);
         float m1 = line1.m; float b1 = line1.b;
@@ -211,6 +241,20 @@ void main() {
         }
         if (numIntersected > 0) {
             newXStar = holdingPoint;
+        } else {
+            // vec2 sdfCoord = (newXStar + SDFtranslate) * SDFscale;
+            // // The "floor(...) + 0.5" ensures we know the behaviour of the sampler lookup;
+            // //  [0, 1) -> 0.5
+            // vec2 sdfUV = (floor(sdfCoord) + 0.5) / SDFSize;
+            // if (!(sdfUV.x < 0.0 || sdfUV.x > 1.0 || sdfUV.y < 0.0 || sdfUV.y > 1.0)) {
+            //     vec4 x_sdf = texture2D(SDF, sdfUV);
+            //     float mag = x_sdf.x; vec2 dir = x_sdf.yz;
+            //     if (mag > -boundaryMargin) {
+            //         vec2 c = (floor(sdfCoord) + 0.5) / SDFscale - SDFtranslate;
+            //         float cellMag = dot(c - x, dir);
+            //         newXStar = newXStar + dir * (mag + cellMag + boundaryMargin);
+            //     }
+            // }
         }
 
         //// Stable, reference behaviour of floor and two walls that extend out to infinity.
@@ -229,15 +273,6 @@ void main() {
         //     newXStar.x -= (x.x - newXStar.x) / (x.y - newXStar.y) * abs(newXStar.y - tWall);
         //     newXStar.y = tWall;
         // }
-
-        if (debug) {
-            if (mod(computeIndex, 2.0) == 0.0) {
-                gl_FragColor = interpretFloat(newXStar.x);
-            } else {
-                gl_FragColor = interpretFloat(newXStar.y);
-            }
-            return;
-        }
 
         // This hurts me... we're doing the exact same calculation twice since
         //  these textures only have enough space for one float per fragment.

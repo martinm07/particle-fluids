@@ -22,6 +22,10 @@ export class aColor {
       }
     }
   }
+
+  equals(c2: aColor) {
+    return this.alpha === c2.alpha && this.color.equals(c2.color);
+  }
 }
 
 export interface CanvasVisual {

@@ -1,3 +1,53 @@
+# v1.4.0
+
+### General:
+
+- Add dependency "clone" for deep cloning in ParticleRender for Visuals objects equality comparisons
+- Add distinguishing of "blur areas" painted on by the `move-segments-sdf.glsl` shader and normal areas of the SDF through the 4th float value on the texture (which will be 1 or 0 respectively). This may be helpful for the collision detection & response.
+
+### In `Algorthim.ts`:
+
+- Wrap trianglesToLineSegments() calls with cleanupLineSegments() calls.
+- Move the vizSDF() debugger function into `devtesting.ts`
+- Redo the SDF lifecycle to have differentBounds in consumeNewBoundsDifference() be adjusted by trianglesToLineSegments using just the unchanged bounds of that frame, rather than all the bounds from the previous frame
+
+### In `sdf.ts`:
+
+- Change moveSegmentSDFShader to a much simpler version that works as wanted
+- Add boundaryMargin as field to class, which extends the borders of the SDF by that amount (in simulation space scale)
+- Add method getSize()
+
+### In `shaders/compute-shader-5.glsl`:
+
+- Add utilisation of SDF for boundary collision detection
+
+### In `boundsHelper.ts`:
+
+- Add leniency for numerical error in segmentsEqual(), pointOnSegmentLine() and triangleContainsPoint()
+- Add argument returnNormalOnP boolean to isInsideSolid(), which if true will make it return the normal of the segment that the point p passed in sits on, if it is sitting on a segment
+- Redo combineTriSegPartials() to actually work as intended
+- Fix issue prefilling line segments in the trianglesToLineSegments() function
+- Add support in cleanupLineSegments() for LineSegmentsReference input with boolean[][] normals
+
+### In `helper.ts`:
+
+- Add fEq() and lEq() exports, for fuzzy comparison of two floats and two lists respectively
+
+### In `ParticleRender.ts`:
+
+- Add methods updateParticleVisual(), updateFluidVisual() and updateCanvasVisual(), for updating visuals after initialisation
+- Fix some maths in translateCanvasCoord function internal to relativeLineBounds() method
+- Factor out addFluidVisual() method from constructor, and add method destroyFluidVisual(), both of which are used in updateCanvasVisual() for a varying number of fluidCopies
+
+### In `script.ts`:
+
+- Redo visualiseBounds() to return a function that updates the visualisation, and allows for a varying number of line segments
+
+### In `visuals/ParticleGeometry.ts`:
+
+- Add method updateShape() to ParticleGeometry class
+- Add new export shapeEquals()
+
 # v1.3.0
 
 ### General:

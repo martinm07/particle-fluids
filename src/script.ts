@@ -14,7 +14,7 @@ import { FluidVisual } from "./visuals/FluidVisuals";
 
 const MAX_NEIGHBOURS = 64;
 // There is an issue with non-power-of-2 values here- quite mysterious
-const N_PARTICLES = 128;
+const N_PARTICLES = 256;
 
 console.log(`CPU is ${isLittleEndianness ? "little-endian" : "big-endian"}`);
 
@@ -165,6 +165,7 @@ const particleRenderer = new ParticleRender(
   canvasVisual
 );
 
+// IMP: Doesn't account for multiple fluidVisuals, nor their individual transform/translates
 export function visualiseBounds(
   lineSegments: Segment[] | LineSegmentsReference,
   scale?: number
@@ -177,25 +178,79 @@ export function visualiseBounds(
     segments = lineSegments;
   else segments = lineSegments.flat();
 
-  for (const seg of segments) {
-    const linePoints = [];
-    linePoints.push(new THREE.Vector3(seg[0] * SCALE, seg[1] * SCALE, 0));
-    linePoints.push(new THREE.Vector3(seg[2] * SCALE, seg[3] * SCALE, 0));
-    const linesGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+  const lines: THREE.Line[] = [];
+  const addLine = (seg: Segment) => {
+    const linesGeometry = new THREE.BufferGeometry();
+    // prettier-ignore
+    const positions = new Float32Array([
+      seg[0] * SCALE, seg[1] * SCALE, -1,
+      seg[2] * SCALE, seg[3] * SCALE, -1,
+    ]);
+    linesGeometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(positions, 3)
+    );
+
     const line = new THREE.Line(linesGeometry, lineMaterial);
     particleRenderer.scene.add(line);
-  }
+    lines.push(line);
+  };
+
+  for (const seg of segments) addLine(seg);
+
+  // Update the bounds viz
+  return (newSegments: Segment[] | LineSegmentsReference) => {
+    let segments: Segment[];
+    if (((o: any): o is Segment[] => typeof o[0][0] === "number")(newSegments))
+      segments = newSegments;
+    else segments = newSegments.flat();
+
+    // if (segments.length !== lines.length)
+    //   console.log(lineSegments, newSegments);
+    // if (segments.length !== 4) console.log(newSegments);
+
+    const numReusedLines = Math.min(segments.length, lines.length);
+    let i;
+    for (i = 0; i < numReusedLines; i++) {
+      const seg = segments[i];
+      const positionAttribute = lines[i].geometry.getAttribute("position");
+      positionAttribute.setXYZ(0, seg[0] * SCALE, seg[1] * SCALE, -1);
+      positionAttribute.setXYZ(1, seg[2] * SCALE, seg[3] * SCALE, -1);
+      positionAttribute.needsUpdate = true;
+
+      if (lines[i].parent !== particleRenderer.scene)
+        particleRenderer.scene.add(lines[i]);
+    }
+
+    for (i; i < segments.length; i++) {
+      const seg = segments[i];
+      addLine(seg);
+    }
+
+    for (i; i < lines.length; i++) {
+      particleRenderer.scene.remove(lines[i]);
+    }
+  };
 }
 
-const bounds: SolidObjs = [
-  [-20, -20, 20, -20, 20, -21],
-  [-20, -20, -20, -21, 20, -21],
-  [-10, -20, -10, 20, -11, 20],
-  [-10, -20, -11, -20, -11, 20],
-  [10, -20, 10, 20, 11, 20],
-  [10, -20, 11, -20, 11, 20],
-  [-25.876949740034664, -21, 25.876949740034664, -21, 25.776949740034664, 21],
+// const bounds: SolidObjs = [
+//   [-20, -20, 20, -20, 20, -21],
+//   [-20, -20, -20, -21, 20, -21],
+//   [-10, -20, -10, 20, -11, 20],
+//   [-10, -20, -11, -20, -11, 20],
+//   [10, -20, 10, 20, 11, 20],
+//   [10, -20, 11, -20, 11, 20],
+//   [-25.876949740034664, -21, 25.876949740034664, -21, 25.776949740034664, 21],
+// ];
+const boundsRel: SolidObjs = [
+  // [0.05, 0, 0.95, 0, 0.95, 0.1],
+  // [0.05, 0, 0.95, 0.1, 0.05, 0.1],
+  [0, 0, 1, 0, 1, -0.1],
+  [0, 0, 0, 1, -0.1, 1],
+  [1, 0, 1, 1, 1.1, 1],
 ];
+let bounds = particleRenderer.relativeLineBounds(boundsRel, 0);
+console.log(bounds);
 
 const sim = new Algorithm(particleRenderer.renderer, { SOLVER_ITERATIONS: 3 });
 const init = () => {
@@ -204,10 +259,9 @@ const init = () => {
   });
   particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
   particleRenderer.render();
-  console.log(particleRenderer.relativeLineBounds([[0, 0, 1, 0, 1, 1]], 0));
 };
 init();
-visualiseBounds(sim.sdf?.bounds!);
+const updateBoundsViz = visualiseBounds(sim.sdf?.bounds!);
 
 let debug = false;
 let paused = true;
@@ -219,7 +273,14 @@ function render() {
     sim.step(paused ? 0.0166 : undefined);
     particleRenderer.setParticleStates(sim.positions!, sim.velocities!);
   }
+  const sizeChanged = particleRenderer.hasSizeChanged();
   particleRenderer.render();
+
+  // updateBoundsViz(sim.sdf?.bounds!);
+  if (sizeChanged) {
+    bounds = particleRenderer.relativeLineBounds(boundsRel, 0);
+    sim.updateBounds(bounds);
+  }
 
   frame = false;
   debug = false;

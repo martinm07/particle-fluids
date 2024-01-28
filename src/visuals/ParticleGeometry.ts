@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { getSizeXY } from "../helper";
+import { getSizeXY, lEq } from "../helper";
 
 export interface ParticleShape {
   setIndices: () => number[];
@@ -32,13 +32,21 @@ export class CircleShape implements ParticleShape {
     }
     return vertices;
   }
+  equals(s2: ParticleShape) {
+    return shapeEquals(this, s2);
+  }
 }
+
+export const shapeEquals = (s1: ParticleShape, s2: ParticleShape) =>
+  lEq(s1.setVertices(), s2.setVertices()) &&
+  lEq(s1.setIndices(), s2.setIndices());
 
 export class ParticleGeometry extends THREE.BufferGeometry {
   nParticles: number;
   posTexWidth: number;
   posTexHeight: number;
 
+  maxPoints: number;
   points: number;
 
   indices: number[];
@@ -46,7 +54,11 @@ export class ParticleGeometry extends THREE.BufferGeometry {
   referencesX: THREE.BufferAttribute;
   referencesY: THREE.BufferAttribute;
 
-  constructor(nParticles: number, particleShape: ParticleShape) {
+  constructor(
+    nParticles: number,
+    particleShape: ParticleShape,
+    maxShapeVerts?: number
+  ) {
     super();
 
     this.nParticles = nParticles;
@@ -56,17 +68,20 @@ export class ParticleGeometry extends THREE.BufferGeometry {
     const vertices = particleShape.setVertices();
 
     this.points = (nParticles * vertices.length) / 3;
+    this.maxPoints = maxShapeVerts
+      ? (nParticles * maxShapeVerts) / 3
+      : this.points;
 
     this.vertices = new THREE.BufferAttribute(
-      new Float32Array(this.points * 3),
+      new Float32Array(this.maxPoints * 3),
       3
     );
     this.referencesX = new THREE.BufferAttribute(
-      new Float32Array(this.points * 2),
+      new Float32Array(this.maxPoints * 2),
       2
     );
     this.referencesY = new THREE.BufferAttribute(
-      new Float32Array(this.points * 2),
+      new Float32Array(this.maxPoints * 2),
       2
     );
     this.indices = [];
@@ -79,6 +94,7 @@ export class ParticleGeometry extends THREE.BufferGeometry {
     this.setAttribute("position", this.vertices);
     this.setAttribute("referenceX", this.referencesX);
     this.setAttribute("referenceY", this.referencesY);
+    this.setDrawRange(0, this.indices.length);
     // optional
     this.attributes.referenceX.name = "referenceX";
     this.attributes.referenceY.name = "referenceY";
@@ -128,6 +144,35 @@ export class ParticleGeometry extends THREE.BufferGeometry {
       this.referencesY.set([refYx, refYy], v * 2);
     }
   }
-}
 
-// new ParticleGeometry(1, new CircleShape())
+  updateShape(particleShape: ParticleShape) {
+    const indices = particleShape.setIndices();
+    const vertices = particleShape.setVertices();
+
+    const points = (this.nParticles * vertices.length) / 3;
+    if (points > this.maxPoints)
+      throw new Error(
+        `Number of vertices of shape (${
+          vertices.length / 3
+        }) has exceeded the maximum allowed on this geometry (${
+          this.maxPoints / this.nParticles
+        }).`
+      );
+
+    this.points = points;
+
+    this.applyVertices(vertices);
+    this.indices = [];
+    this.applyIndices(indices);
+    this.setDrawRange(0, this.indices.length);
+
+    this.setPositionTextureReference();
+    this.setIndex(this.indices);
+    this.vertices.needsUpdate = true;
+    this.referencesX.needsUpdate = true;
+    this.referencesY.needsUpdate = true;
+    //// May be necessary?
+    // this.computeBoundingBox();
+    // this.computeBoundingSphere();
+  }
+}
