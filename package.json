@@ -1,6 +1,6 @@
 {
   "name": "particle-fluids",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "repository": {
     "url": "https://github.com/martinm07/ThreeJS-PBF-Algorithm"
   },
@@ -30,13 +30,12 @@
   },
   "dependencies": {
     "clone": "^2.1.2",
-    "graham_scan": "^1.0.5",
+    "graham-scanner": "^1.1.3",
     "three": "^0.153.0"
   },
   "devDependencies": {
-    "@types/graham_scan": "^1.0.31",
-    "@types/three": "^0.152.1",
     "@types/clone": "^2.1.4",
+    "@types/three": "^0.152.1",
     "typescript": "^5.0.2",
     "vite": "^4.3.9",
     "vite-plugin-dts": "^3.6.0",
