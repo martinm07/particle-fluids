@@ -1,3 +1,5 @@
+// import * as THREE from "three";
+import { Algorithm } from "./Algorithm";
 import {
   adjustLineSegmentsIntersection,
   basicTrianglesToLineSegments,
@@ -157,4 +159,56 @@ const vizSDF = () => {
     }`
   );
 };
-setTimeout(vizSDF);
+// setTimeout(vizSDF);
+
+const algorithmSDF = () => {
+  const boundsTest: SolidObjs = [
+    [0, 0.8, 1, 0, 1, -0.1],
+    // [0, 0, 0, 1, -0.1, 1],
+    // [1, 0, 1, 1, 1.1, 1],
+  ];
+  const boundsTest2: SolidObjs = [
+    [0, 1, 1, 0.2, 1, 0.1],
+    // [0, 0, 1, 0, 1, -0.1],
+
+    // [0, 0, 0, 1, -0.1, 1],
+    // [1, 0, 1, 1, 1.1, 1],
+  ];
+  visualiseTexture(
+    canvasContainer,
+    (renderer) => {
+      const sim = new Algorithm(renderer, {
+        SOLVER_ITERATIONS: 1,
+        BOUNDARY_MARGIN: 0.05,
+      });
+      sim.init(1, 2, boundsTest, [0, 0]);
+      sim.updateBounds(boundsTest2);
+      sim.step(0, true);
+      // sim.step();
+      // sim.step();
+
+      setTimeout(visualiseBounds.bind(null, sim.sdf!.bounds!, 0.25));
+
+      const tex = sim.sdf!.returnSDF();
+      // const tex = sim.sdf!.movegpuc.renderTarget.texture;
+      // const tex = sim.sdf!.gpuc.renderTarget.texture;
+      const [width, height] = sim.sdf!.getSize();
+      return [tex, width, height];
+      // return [new THREE.Texture(), 0, 0];
+    },
+    `uniform sampler2D tex;
+
+  void main() {
+      float index = 0.0 + (gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * resolution.x;
+
+      vec2 uv = gl_FragCoord.xy / resolution.xy;
+      vec4 info = texture2D(tex, uv).xyzw;
+
+      float max = 1.0;
+      info.x = pow(1.0 + info.x, 5.0) - 1.0;
+      if (info.x < 0.0) gl_FragColor = vec4(-info.x / max, 0.0, 0.0, 1.0);
+      else gl_FragColor  = vec4(0.0, 0.0, info.x / max, 1.0);
+  }`
+  );
+};
+setTimeout(algorithmSDF);

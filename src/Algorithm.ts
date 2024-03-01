@@ -137,7 +137,11 @@ export class Algorithm {
     nParticles: number,
     maxNeighbours: number,
     bounds: SolidObjs = [],
-    initPositions: (i: number) => Vec2 | number[] | Float32Array | THREE.Texture
+    initPositions:
+      | ((i: number) => Vec2)
+      | number[]
+      | Float32Array
+      | THREE.Texture
   ) {
     this.P_ = 2 * nParticles;
     this.MAX_NEIGHBOURS_ = maxNeighbours;
@@ -459,7 +463,7 @@ export class Algorithm {
     return neighbours;
   }
 
-  step(fixedDeltaT?: number) {
+  step(fixedDeltaT?: number, noSDFRefresh: boolean = false) {
     if (!this.isInitialized()) throw new Error("Didn't yet call `.init()`");
 
     let delta: number;
@@ -651,11 +655,11 @@ export class Algorithm {
 
     this.debug = false;
 
-    if (this.boundsChanged) {
+    if (!noSDFRefresh && this.boundsChanged) {
       this.bounds = this.newBounds;
       this.sdf.returnSDF(updatedLineBounds, updatedNormals);
+      this.boundsChanged = false;
     }
-    this.boundsChanged = false;
 
     return this.positions;
   }
@@ -680,26 +684,19 @@ export class Algorithm {
   ] {
     if (!this.isInitialized()) throw new Error("Algorithm not initialized");
 
-    const differentIndices: number[] = [];
     this.newBounds.forEach((triangle, i) => {
-      if (!trianglesEqual(this.bounds[i], triangle)) differentIndices.push(i);
+      if (!trianglesEqual(this.bounds[i], triangle)) {
+        this.sdf.moveSegmentGroup(this.bounds[i], triangle);
+        this.boundsChanged = true;
+      }
     });
-    if (differentIndices.length === 0) return [[], []];
-    this.boundsChanged = true;
 
-    const [allSegments, allNormals] = cleanupLineSegments(
+    return cleanupLineSegments(
       ...trianglesToLineSegments(this.newBounds, {
         normals: true,
         triangleRef: true,
       })
     );
-    const differentSegments = allSegments.filter((_, i) =>
-      differentIndices.includes(i)
-    );
-    // console.log(allSegments, differentSegments, this.sdf.bounds!);
-    for (let i = 0; i < differentSegments.length; i++)
-      this.sdf.moveSegmentGroup(differentIndices[i], differentSegments[i]);
-    return [allSegments, allNormals];
   }
 
   correctInitialPositions() {

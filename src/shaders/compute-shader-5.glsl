@@ -156,7 +156,8 @@ void main() {
         if (!(sdfUV.x < 0.0 || sdfUV.x > 1.0 || sdfUV.y < 0.0 || sdfUV.y > 1.0)) {
             vec4 x_sdf = texture2D(SDF, sdfUV);
             float mag = x_sdf.x; vec2 dir = x_sdf.yz; float isBoundsMove = x_sdf.w;
-            if (mag > -boundaryMargin) {
+            if (mag > 0.0 || (mag > -boundaryMargin && dot(newXStar - x, dir) <= 0.0)) {
+            // if (mag > -boundaryMargin) {
                 vec2 c = (floor(sdfCoord) + 0.5) / SDFscale - SDFtranslate;
                 float cellMag = dot(c - x, dir);
                 newXStar = x + dir * (mag + cellMag + boundaryMargin);

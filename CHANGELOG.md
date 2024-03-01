@@ -1,3 +1,28 @@
+# v1.5.0
+
+### General
+
+- Migrate from the "graham_scan" package, over to the inhouse "graham-scanner" which addresses problems with collinear points on the convex hull.
+
+### In `Algorithm.ts`
+
+- Fix TypeScript syntax error in init method arguments.
+- Add optional argument "noSDFRefresh" to step(), which will disallow the reconstruction of the SDF after a frame where bounds have moved. Mostly there for testing purposes.
+- Change the private method consumeNewBoundsDifference() to pass in the old and new triangles to the sdf moveSegmentGroup function, rather than the processes list of line segments.
+
+### In `sdf.ts`
+
+- Add optional argument "addVerts" (boolean) to updateCenterScale() which asks whether the supplied vertices should increase the current computed values of top, right, bottom, left, or recompute them entirely.
+- Redo the moveSegmentGroup algorithm. Added a docstring to explain the new one.
+
+### In move-segments-sdf.glsl
+
+- Redo the entire algorithm. The new one is also explained in the docstring mentioned above.
+
+### In `compute-shader-5.glsl`
+
+- Change the check for if the particle is positioned inside a solid from the SDF, to try let particles fall away from walls (i.e. not stick to them).
+
 # v1.4.0
 
 ### General:

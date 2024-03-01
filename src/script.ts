@@ -245,9 +245,14 @@ export function visualiseBounds(
 const boundsRel: SolidObjs = [
   // [0.05, 0, 0.95, 0, 0.95, 0.1],
   // [0.05, 0, 0.95, 0.1, 0.05, 0.1],
-  [0, 0, 1, 0, 1, -0.1],
-  [0, 0, 0, 1, -0.1, 1],
-  [1, 0, 1, 1, 1.1, 1],
+
+  // [0, 0, 1, 0, 1, -0.1],
+  // [0, 0, 0, 1, -0.1, 1],
+  // [1, 0, 1, 1, 1.1, 1],
+
+  [0.25, 0.25, 0.75, 0.25, 0.75, 0.2],
+  [0.25, 0.25, 0.25, 1.25, 0.2, 1.25],
+  [0.75, 0.25, 0.75, 1.25, 0.8, 1.25],
 ];
 let bounds = particleRenderer.relativeLineBounds(boundsRel, 0);
 console.log(bounds);
@@ -276,7 +281,7 @@ function render() {
   const sizeChanged = particleRenderer.hasSizeChanged();
   particleRenderer.render();
 
-  // updateBoundsViz(sim.sdf?.bounds!);
+  updateBoundsViz(sim.sdf?.bounds!);
   if (sizeChanged) {
     bounds = particleRenderer.relativeLineBounds(boundsRel, 0);
     sim.updateBounds(bounds);
