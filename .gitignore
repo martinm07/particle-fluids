@@ -25,3 +25,4 @@ dist-ssr
 
 gpgpu_birds/
 **/_DEPR_*
+.obsidian/
