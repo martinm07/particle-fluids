@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { GPUCompute } from "./GPUCompute";
-import { Vec2, Segment, Triangle } from "./helper";
+import { Vec2, Triangle } from "./helper";
 import { LineSegmentsReference } from "./boundsHelper";
 import GrahamScan from "graham-scanner";
 
@@ -9,6 +9,13 @@ import moveSegmentSDFShader from "./shaders/move-segments-sdf3.glsl";
 // import moveSegmentsSDFShader2 from "./shaders/_DEPR_move-segments-sdf.glsl";
 
 const NUL = Number.parseFloat(import.meta.env.VITE_NUL);
+
+interface SDFParams {
+  width?: number;
+  height?: number;
+  boundaryMargin?: number;
+  movementExtraMargin?: number;
+}
 
 /*
 IMP: First apply this.translate, then this.scale:
@@ -19,6 +26,7 @@ export class SDF {
   width: number;
   height: number;
   boundaryMargin: number;
+  movementExtraMargin: number;
 
   bounds?: LineSegmentsReference;
   segmentNormals?: boolean[][];
@@ -30,17 +38,11 @@ export class SDF {
   scale?: Vec2;
   translate?: Vec2;
 
-  constructor(
-    renderer: THREE.WebGLRenderer,
-    params: { width: number; height: number; boundaryMargin: number } = {
-      width: 200,
-      height: 200,
-      boundaryMargin: 0.5,
-    }
-  ) {
-    this.width = params.width;
-    this.height = params.height;
-    this.boundaryMargin = params.boundaryMargin;
+  constructor(renderer: THREE.WebGLRenderer, params?: SDFParams) {
+    this.width = params?.width ?? 200;
+    this.height = params?.height ?? 200;
+    this.boundaryMargin = params?.boundaryMargin ?? 0.5;
+    this.movementExtraMargin = params?.movementExtraMargin ?? 0.1;
 
     this.gpuc = new GPUCompute(
       [this.width, this.height],
@@ -51,18 +53,8 @@ export class SDF {
         type: THREE.FloatType,
       }
     );
-    this.gpuc.updateUniform("boundaryMargin", params.boundaryMargin);
+    this.gpuc.updateUniform("boundaryMargin", this.boundaryMargin);
     this.texture = this.gpuc.renderTarget.texture;
-
-    // this.movegpuc = new GPUCompute(
-    //   [this.width, this.height],
-    //   moveSegmentsSDFShader2,
-    //   renderer,
-    //   [],
-    //   {
-    //     type: THREE.FloatType,
-    //   }
-    // );
 
     this.movegpuc = new GPUCompute(
       [this.width, this.height],
@@ -73,7 +65,8 @@ export class SDF {
         type: THREE.FloatType,
       }
     );
-    this.movegpuc.updateUniform("boundaryMargin", params.boundaryMargin);
+    this.movegpuc.updateUniform("boundaryMargin", this.boundaryMargin);
+    this.movegpuc.updateUniform("extraMargin", this.movementExtraMargin);
   }
 
   isInitialized(): this is SDFIsInitialized {
@@ -84,23 +77,26 @@ export class SDF {
   updateCenterScale(): void;
   updateCenterScale(vertsX: number[], vertsY: number[], addVerts?: false): void;
   updateCenterScale(vertsX: number[], vertsY: number[], addVerts: true): void;
-  // prettier-ignore
-  updateCenterScale(vertsX?: number[], vertsY?: number[], addVerts?: boolean): void {
+  updateCenterScale(
+    vertsX?: number[],
+    vertsY?: number[],
+    addVerts?: boolean
+  ): void {
     if (!this.isInitialized()) return;
     if (this.bounds.length === 0) {
       this.scale = [1, 1];
       this.translate = [0, 0];
     } else {
       const vertsX_ =
-      vertsX ?? this.bounds.flat(2).filter((_, i) => i % 2 === 0);
+        vertsX ?? this.bounds.flat(2).filter((_, i) => i % 2 === 0);
       const vertsY_ =
-      vertsY ?? this.bounds.flat(2).filter((_, i) => i % 2 === 1);
-      
+        vertsY ?? this.bounds.flat(2).filter((_, i) => i % 2 === 1);
+
       let top = Math.max.apply(null, vertsY_) + this.boundaryMargin;
       let right = Math.max.apply(null, vertsX_) + this.boundaryMargin;
       let bottom = Math.min.apply(null, vertsY_) - this.boundaryMargin;
       let left = Math.min.apply(null, vertsX_) - this.boundaryMargin;
-      
+
       if (addVerts) {
         const oldLeft = -this.translate[0];
         const oldBottom = -this.translate[1];
@@ -237,7 +233,7 @@ export class SDF {
           ];
 
     const permuteTri = (t: Triangle, perm: number[]) =>
-      Array.from(Array(t.length), (_, i) => t[perm[i]]);
+      Array.from(Array(6), (_, i) => t[perm[Math.floor(i / 2)] * 2 + (i % 2)]);
 
     let bestScore = 0;
     let bestK = 0;
@@ -252,7 +248,7 @@ export class SDF {
         bestK = k;
       }
     }
-    const bestPerm = perms[bestK];
+    const backVerts = permuteTri(oldTri, perms[bestK]);
 
     // determine line segments of newTri that are part of the frontier
     //  (i.e. are part of the convex hull)
@@ -260,8 +256,7 @@ export class SDF {
       return { x: newTri[i * 2], y: newTri[i * 2 + 1], i };
     });
 
-    const frontSegs: Segment[] = [];
-    const backSegs: Segment[] = [];
+    const segIndices: [v1: number, v2: number][] = [];
     for (let i = 0; i < hull.length; i++) {
       const v1 = hull[i];
       const v2 = hull[(i + 1) % hull.length];
@@ -272,20 +267,16 @@ export class SDF {
       const v2i = newTri_.filter((v) => v2.x === v.x && v2.y === v.y)?.[0]?.i;
       if (v2i === undefined) continue;
 
-      frontSegs.push([v1.x, v1.y, v2.x, v2.y]);
-      // prettier-ignore
-      backSegs.push([oldTri[bestPerm[v1i] * 2], oldTri[bestPerm[v1i] * 2 + 1], oldTri[bestPerm[v2i] * 2], oldTri[bestPerm[v2i] * 2 + 1]])
+      segIndices.push([v1i, v2i]);
     }
 
     const hullFlat = hull.flatMap((v) => [v.x, v.y]);
     if (hull.length < 6) hullFlat.push(NUL, 0);
     this.movegpuc.updateUniform("areaVerts", hullFlat);
-    if (backSegs.length < 3) backSegs.push([NUL, 0, 0, 0]);
-    this.movegpuc.updateUniform("preSegs", backSegs.flat());
-    if (frontSegs.length < 3) frontSegs.push([NUL, 0, 0, 0]);
-    this.movegpuc.updateUniform("postSegs", frontSegs.flat());
-
-    // console.log(backSegs, frontSegs);
+    this.movegpuc.updateUniform("backVerts", backVerts);
+    this.movegpuc.updateUniform("frontVerts", newTri);
+    if (segIndices.length < 3) segIndices.push([-1, -1]);
+    this.movegpuc.updateUniform("segIndices", segIndices.flat());
 
     this.movegpuc.updateUniform("oldScale", this.scale);
     this.movegpuc.updateUniform("oldTranslate", this.translate);

@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { DataTexture, RGBAFormat, RGFormat, RedFormat, FloatType } from "three";
 import { GPUCompute } from "./GPUCompute";
 import { TestResult } from "./__tests__/Algorithm.test";
+import { LineSegmentsReference } from "./boundsHelper";
+import { ParticleRender } from "./ParticleRender";
 
 const TOL = import.meta.env.VITE_TOL;
 
@@ -343,6 +345,28 @@ export function trianglesEqual(tri1: Triangle, tri2: Triangle) {
   } else return false;
 }
 
+export function fTrianglesEqual(tri1: Triangle, tri2: Triangle) {
+  if (fEq(tri1[0], tri2[0]) && fEq(tri1[1], tri2[1])) {
+    if (fEq(tri1[2], tri2[2]) && fEq(tri1[3], tri2[3])) {
+      if (fEq(tri1[4], tri2[4]) && fEq(tri1[5], tri2[5])) return true;
+    } else if (fEq(tri1[2], tri2[4]) && fEq(tri1[3], tri2[5])) {
+      if (fEq(tri1[4], tri2[2]) && fEq(tri1[5], tri2[3])) return true;
+    } else return false;
+  } else if (fEq(tri1[0], tri2[2]) && fEq(tri1[1], tri2[3])) {
+    if (fEq(tri1[2], tri2[0]) && fEq(tri1[3], tri2[1])) {
+      if (fEq(tri1[4], tri2[4]) && fEq(tri1[5], tri2[5])) return true;
+    } else if (fEq(tri1[2], tri2[4]) && fEq(tri1[3], tri2[5])) {
+      if (fEq(tri1[4], tri2[0]) && fEq(tri1[5], tri2[1])) return true;
+    } else return false;
+  } else if (fEq(tri1[0], tri2[4]) && fEq(tri1[1], tri2[5])) {
+    if (fEq(tri1[2], tri2[0]) && fEq(tri1[3], tri2[1])) {
+      if (fEq(tri1[4], tri2[2]) && fEq(tri1[5], tri2[3])) return true;
+    } else if (fEq(tri1[2], tri2[2]) && fEq(tri1[3], tri2[3])) {
+      if (fEq(tri1[4], tri2[0]) && fEq(tri1[5], tri2[1])) return true;
+    } else return false;
+  } else return false;
+}
+
 export function visualiseTexture(
   canvasContainer: HTMLElement,
   generateTex: (
@@ -442,3 +466,73 @@ export function inverseTransform(matrix: Transformation): Transformation {
 export const lEq = (l1: unknown[], l2: unknown[]) =>
   l1.every((el, i) => el === l2[i]);
 export const fEq = (f1: number, f2: number) => Math.abs(f1 - f2) < 0.000001;
+
+// IMP: Doesn't account for multiple fluidVisuals, nor their individual transform/translates
+export function visualiseBounds(
+  particleRenderer: ParticleRender,
+  lineSegments: Segment[] | LineSegmentsReference,
+  scale?: number
+) {
+  if (lineSegments.length !== 9) console.log(lineSegments);
+  const SCALE = scale ? scale : particleRenderer.scale;
+  const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
+
+  let segments: Segment[];
+  if (((o: any): o is Segment[] => typeof o[0][0] === "number")(lineSegments))
+    segments = lineSegments;
+  else segments = lineSegments.flat();
+
+  const lines: THREE.Line[] = [];
+  const addLine = (seg: Segment) => {
+    const linesGeometry = new THREE.BufferGeometry();
+    // prettier-ignore
+    const positions = new Float32Array([
+      seg[0] * SCALE, seg[1] * SCALE, -1,
+      seg[2] * SCALE, seg[3] * SCALE, -1,
+    ]);
+    linesGeometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(positions, 3)
+    );
+
+    const line = new THREE.Line(linesGeometry, lineMaterial);
+    particleRenderer.scene.add(line);
+    lines.push(line);
+  };
+
+  for (const seg of segments) addLine(seg);
+
+  // Update the bounds viz
+  return (newSegments: Segment[] | LineSegmentsReference) => {
+    let segments: Segment[];
+    if (((o: any): o is Segment[] => typeof o[0][0] === "number")(newSegments))
+      segments = newSegments;
+    else segments = newSegments.flat();
+
+    // if (segments.length !== lines.length)
+    //   console.log(lineSegments, newSegments);
+    // if (segments.length !== 4) console.log(newSegments);
+
+    const numReusedLines = Math.min(segments.length, lines.length);
+    let i;
+    for (i = 0; i < numReusedLines; i++) {
+      const seg = segments[i];
+      const positionAttribute = lines[i].geometry.getAttribute("position");
+      positionAttribute.setXYZ(0, seg[0] * SCALE, seg[1] * SCALE, -1);
+      positionAttribute.setXYZ(1, seg[2] * SCALE, seg[3] * SCALE, -1);
+      positionAttribute.needsUpdate = true;
+
+      if (lines[i].parent !== particleRenderer.scene)
+        particleRenderer.scene.add(lines[i]);
+    }
+
+    for (i; i < segments.length; i++) {
+      const seg = segments[i];
+      addLine(seg);
+    }
+
+    for (i; i < lines.length; i++) {
+      particleRenderer.scene.remove(lines[i]);
+    }
+  };
+}

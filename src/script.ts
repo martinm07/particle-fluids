@@ -1,8 +1,11 @@
 import * as THREE from "three";
 
-import { isLittleEndianness, formatNumber, SolidObjs, Segment } from "./helper";
-
-import { LineSegmentsReference } from "./boundsHelper";
+import {
+  isLittleEndianness,
+  formatNumber,
+  SolidObjs,
+  visualiseBounds,
+} from "./helper";
 
 import { Algorithm } from "./Algorithm";
 import { ParticleRender } from "./ParticleRender";
@@ -159,79 +162,11 @@ const canvasVisual: CanvasVisual = {
   fluidCopies: [fluidVisual],
 };
 
-const particleRenderer = new ParticleRender(
+export const particleRenderer = new ParticleRender(
   container,
   N_PARTICLES,
   canvasVisual
 );
-
-// IMP: Doesn't account for multiple fluidVisuals, nor their individual transform/translates
-export function visualiseBounds(
-  lineSegments: Segment[] | LineSegmentsReference,
-  scale?: number
-) {
-  const SCALE = scale ? scale : particleRenderer.scale;
-  const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
-
-  let segments: Segment[];
-  if (((o: any): o is Segment[] => typeof o[0][0] === "number")(lineSegments))
-    segments = lineSegments;
-  else segments = lineSegments.flat();
-
-  const lines: THREE.Line[] = [];
-  const addLine = (seg: Segment) => {
-    const linesGeometry = new THREE.BufferGeometry();
-    // prettier-ignore
-    const positions = new Float32Array([
-      seg[0] * SCALE, seg[1] * SCALE, -1,
-      seg[2] * SCALE, seg[3] * SCALE, -1,
-    ]);
-    linesGeometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(positions, 3)
-    );
-
-    const line = new THREE.Line(linesGeometry, lineMaterial);
-    particleRenderer.scene.add(line);
-    lines.push(line);
-  };
-
-  for (const seg of segments) addLine(seg);
-
-  // Update the bounds viz
-  return (newSegments: Segment[] | LineSegmentsReference) => {
-    let segments: Segment[];
-    if (((o: any): o is Segment[] => typeof o[0][0] === "number")(newSegments))
-      segments = newSegments;
-    else segments = newSegments.flat();
-
-    // if (segments.length !== lines.length)
-    //   console.log(lineSegments, newSegments);
-    // if (segments.length !== 4) console.log(newSegments);
-
-    const numReusedLines = Math.min(segments.length, lines.length);
-    let i;
-    for (i = 0; i < numReusedLines; i++) {
-      const seg = segments[i];
-      const positionAttribute = lines[i].geometry.getAttribute("position");
-      positionAttribute.setXYZ(0, seg[0] * SCALE, seg[1] * SCALE, -1);
-      positionAttribute.setXYZ(1, seg[2] * SCALE, seg[3] * SCALE, -1);
-      positionAttribute.needsUpdate = true;
-
-      if (lines[i].parent !== particleRenderer.scene)
-        particleRenderer.scene.add(lines[i]);
-    }
-
-    for (i; i < segments.length; i++) {
-      const seg = segments[i];
-      addLine(seg);
-    }
-
-    for (i; i < lines.length; i++) {
-      particleRenderer.scene.remove(lines[i]);
-    }
-  };
-}
 
 // const bounds: SolidObjs = [
 //   [-20, -20, 20, -20, 20, -21],
@@ -251,8 +186,8 @@ const boundsRel: SolidObjs = [
   // [1, 0, 1, 1, 1.1, 1],
 
   [0.25, 0.25, 0.75, 0.25, 0.75, 0.2],
-  [0.25, 0.25, 0.25, 1.25, 0.2, 1.25],
   [0.75, 0.25, 0.75, 1.25, 0.8, 1.25],
+  [0.25, 0.25, 0.25, 1.25, 0.2, 0.25],
 ];
 let bounds = particleRenderer.relativeLineBounds(boundsRel, 0);
 console.log(bounds);
@@ -266,7 +201,7 @@ const init = () => {
   particleRenderer.render();
 };
 init();
-const updateBoundsViz = visualiseBounds(sim.sdf?.bounds!);
+const updateBoundsViz = visualiseBounds(particleRenderer, sim.sdf?.bounds!);
 
 let debug = false;
 let paused = true;

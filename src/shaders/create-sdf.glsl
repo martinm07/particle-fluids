@@ -93,8 +93,9 @@ void main() {
         }
     }
     if (isEnd && !insideAtEnd) nearest = -nearest;
-    float distanceFromZero = sqrt(pow(pos.x - 1.0, 2.0) + pow(pos.y + 1.0, 2.0));
-    isInSpan = true;
-    if (!isInSpan) gl_FragColor = vec4(-10.0, 0.0, 0.0, 0.0);
-    else gl_FragColor = vec4(nearest, dir, 0.0);
+    // float distanceFromZero = sqrt(pow(pos.x - 1.0, 2.0) + pow(pos.y + 1.0, 2.0));
+    // isInSpan = true;
+    // if (!isInSpan) gl_FragColor = vec4(-10.0, 0.0, 0.0, 0.0);
+    // else gl_FragColor = vec4(nearest, dir, 0.0);
+    gl_FragColor = vec4(nearest, dir, 0.0);
 }

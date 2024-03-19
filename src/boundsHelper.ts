@@ -183,13 +183,13 @@ export const segDistance = (seg: Segment, c: Vec2): SegClosestPoint => {
   const p2: Vec2 = [seg[2], seg[3]];
   const p12: Vec2 = [seg[0] - seg[2], seg[1] - seg[3]];
 
-  // It's <= instead of <, because when c is on the edge of the "lane", we'd like it
-  //  to be considered outside the lane instead of inside.
-  const p1CSide = dot(sub(p1, c), p12) <= 0;
-  const p2CSide = dot(sub(p2, c), p12) <= 0;
   // If the vectors pointing from p1 to c, and from p2 to c point in opposite direction,
   //  then c must lie between p1 and p2, on their segment's "lane".
-  if (p1CSide !== p2CSide) {
+  const p1CSide = dot(sub(p1, c), p12);
+  const p2CSide = dot(sub(p2, c), p12);
+  // If c lies on one of the two edges of the lane (where the dot product == 0) then
+  //  we'd like to consider it outside the lane rather than inside
+  if (p1CSide !== 0 && p2CSide !== 0 && p1CSide <= 0 !== p2CSide <= 0) {
     // Thus, the segment's closest point to c must lie on the perpendicular line at c, between p1 and p2.
     const cp2: Vec2 = [c[0] - seg[2], c[1] - seg[3]];
     const p12Len = Math.sqrt(p12[0] ** 2 + p12[1] ** 2);

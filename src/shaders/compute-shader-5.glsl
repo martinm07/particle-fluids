@@ -156,11 +156,16 @@ void main() {
         if (!(sdfUV.x < 0.0 || sdfUV.x > 1.0 || sdfUV.y < 0.0 || sdfUV.y > 1.0)) {
             vec4 x_sdf = texture2D(SDF, sdfUV);
             float mag = x_sdf.x; vec2 dir = x_sdf.yz; float isBoundsMove = x_sdf.w;
-            if (mag > 0.0 || (mag > -boundaryMargin && dot(newXStar - x, dir) <= 0.0)) {
-            // if (mag > -boundaryMargin) {
+            if (mag > 0.0 || (mag > -boundaryMargin && dot(newXStar - x, dir) < 0.0)) {
                 vec2 c = (floor(sdfCoord) + 0.5) / SDFscale - SDFtranslate;
                 float cellMag = dot(c - x, dir);
-                newXStar = x + dir * (mag + cellMag + boundaryMargin);
+
+                if (isBoundsMove == 1.0)
+                    newXStar = x + dir * (mag + cellMag);
+                else
+                    // The extra "+ 0.05" adds a little bounce, which can cause particles to not get stuck
+                    newXStar = x + dir * (mag + cellMag + boundaryMargin + 0.05);
+
                 if (mod(computeIndex, 2.0) == 0.0) {
                     gl_FragColor = interpretFloat(newXStar.x);
                 } else {

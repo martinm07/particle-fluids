@@ -18,7 +18,7 @@ import {
   initMask,
   initTexture,
   texCoords,
-  trianglesEqual,
+  fTrianglesEqual,
 } from "./helper";
 import {
   LineSegmentsReference,
@@ -84,6 +84,8 @@ export class Algorithm {
 
   bounds: SolidObjs = [];
   newBounds: SolidObjs = [];
+  boundsSegments: LineSegmentsReference = [];
+  boundsNormals: boolean[][] = [];
   boundsChanged: boolean = false;
 
   protected xStarBytes?: Uint8Array;
@@ -179,21 +181,19 @@ export class Algorithm {
     this.initCreateInputs();
 
     this.bounds = bounds;
-    const [lineBounds, segmentNormals] = cleanupLineSegments(
+    [this.boundsSegments, this.boundsNormals] = cleanupLineSegments(
       ...trianglesToLineSegments(bounds, {
         normals: true,
         triangleRef: true,
       })
     );
-    const lineBounds_ = lineBounds.flat(2);
-    lineBounds_.push(NUL);
 
     this.sdf = new SDF(this.renderer, {
       width: 200,
       height: 200,
       boundaryMargin: this.params.BOUNDARY_MARGIN,
     });
-    this.sdf.returnSDF(lineBounds, segmentNormals);
+    this.sdf.returnSDF(this.boundsSegments, this.boundsNormals);
 
     this.gpuComputes[1] = new GPUCompute(
       this.P * 2,
@@ -277,7 +277,10 @@ export class Algorithm {
       ]
     );
     this.gpuComputes[5].updateUniform("NUL", NUL);
-    this.gpuComputes[5].updateUniform("lineBounds", lineBounds_);
+    this.gpuComputes[5].updateUniform(
+      "lineBounds",
+      Algorithm.prepareLineSegmentsReference(this.boundsSegments)
+    );
     this.gpuComputes[5].updateUniform(
       "boundaryMargin",
       this.params.BOUNDARY_MARGIN
@@ -341,6 +344,11 @@ export class Algorithm {
     }
 
     this.initSetInputs();
+  }
+  static prepareLineSegmentsReference(lineSegments: LineSegmentsReference) {
+    const lineSegments_ = lineSegments.flat(2);
+    lineSegments_.push(NUL);
+    return lineSegments_;
   }
 
   initCreateInputs() {
@@ -478,8 +486,7 @@ export class Algorithm {
     }
     this.gpuComputes.forEach((gpuc) => gpuc.updateUniform("deltaT", delta));
 
-    const [updatedLineBounds, updatedNormals] =
-      this.consumeNewBoundsDifference();
+    this.consumeNewBoundsDifference();
 
     this.gpuComputes[1].varInputs.force = new Float32Array(
       Array(this.P).fill([0, -this.params.GRAVITY]).flat()
@@ -614,7 +621,10 @@ export class Algorithm {
     this.gpuComputes.forEach((gpuc) => gpuc.updateVaryings());
 
     this.gpuComputes[5].texInputs.X = this.positions;
-    this.gpuComputes[5].updateUniform("lineBounds", this.sdf.bounds!.flat(2));
+    this.gpuComputes[5].updateUniform(
+      "lineBounds",
+      Algorithm.prepareLineSegmentsReference(this.boundsSegments)
+    );
     this.gpuComputes[5].texInputs.SDF = this.sdf.returnSDF();
     this.gpuComputes[5].updateUniform("SDFtranslate", this.sdf.translate);
     this.gpuComputes[5].updateUniform("SDFscale", this.sdf.scale);
@@ -657,7 +667,7 @@ export class Algorithm {
 
     if (!noSDFRefresh && this.boundsChanged) {
       this.bounds = this.newBounds;
-      this.sdf.returnSDF(updatedLineBounds, updatedNormals);
+      this.sdf.returnSDF(this.boundsSegments, this.boundsNormals);
       this.boundsChanged = false;
     }
 
@@ -678,20 +688,18 @@ export class Algorithm {
     this.newBounds = bounds;
   }
 
-  private consumeNewBoundsDifference(): [
-    segments: LineSegmentsReference,
-    normals: boolean[][]
-  ] {
+  consumeNewBoundsDifference() {
     if (!this.isInitialized()) throw new Error("Algorithm not initialized");
 
     this.newBounds.forEach((triangle, i) => {
-      if (!trianglesEqual(this.bounds[i], triangle)) {
+      if (!fTrianglesEqual(this.bounds[i], triangle)) {
         this.sdf.moveSegmentGroup(this.bounds[i], triangle);
         this.boundsChanged = true;
       }
     });
 
-    return cleanupLineSegments(
+    if (!this.boundsChanged) return;
+    [this.boundsSegments, this.boundsNormals] = cleanupLineSegments(
       ...trianglesToLineSegments(this.newBounds, {
         normals: true,
         triangleRef: true,
