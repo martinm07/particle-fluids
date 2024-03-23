@@ -69,7 +69,7 @@ $$
 L_f(x) = f(x_0) + f'(x_0) \cdot (x-x_0)
 $$
 
-It's not too hard to see that this is a line with some y-intercept and slope $\Delta f(x_0)$, and then that $L_f(x_0) = f(x_0)$, which can be enough to convince us that this is indeed the tangent line/plane at point $x_0$. For higher dimensions, the equation of the tangent _plane_ is something like this (for the example of 3 dimensions):
+It's not too hard to see that this is a line with some y-intercept and slope $f'(x_0)$, and then that $L_f(x_0) = f(x_0)$, which can be enough to convince us that this is indeed the tangent line at point $x_0$. For higher dimensions, the equation of the tangent _plane_ is something like this (for the example of 3 dimensions):
 
 $$
 L_f(x, y) = f(x_0, y_0) + \nabla_x f(x_0) \cdot (x-x_0) + \nabla_yf(y_0) \cdot (y - y_0)
@@ -149,7 +149,7 @@ $$
 \Delta \mathbf p_i = \nabla_{\mathbf p_i}C_i(\mathbf p_1, \dots, \mathbf p_n)\lambda_i
 $$
 
-we are doing something quite clever. We are only using the partial derivative with respect to $\mathbf p_i$, meaning we're only adjusting the particle and _assuming_ the neighbours will move similarly to how the full $\nabla C$ gradient wanted them to move. We don't fully make this assumption though because, as you can see in the real Equation (5), we are also utilizing the lambda values of the neighbours, $\lambda_j$. Just to explain, $\nabla_{\mathbf p_i}C_i = \frac1{\rho_0}\sum_j\nabla_{\mathbf p_i} W(\mathbf p_i - \mathbf p_j)$, and so what we're seeing in Equation 5 (ignoring $s_\text{corr}$ for now) rearranged is
+we are doing something quite clever. We are only using the partial derivative with respect to $\mathbf p_i$, meaning we're only adjusting the particle and _assuming_ the neighbours will move similarly to how the full $\nabla C$ gradient wanted them to move. We don't fully make this assumption though because, as you can see in the real Equation (5), we are also utilizing the lambda values of the neighbours, $\lambda_j$. Just to explain, $\nabla_{\mathbf p_i}C_i = \frac1{\rho_0}\sum_j\nabla_{\mathbf p_i} W(\mathbf p_i - \mathbf p_j)$, and so what we're seeing in Equation 5 (ignoring $s_\text{corr}$ for now) rearranged is:
 
 $$
 \Delta \mathbf p_i = \frac1{\rho_0}\lambda_i\sum_j\nabla_{\mathbf p_i}W(\mathbf p_i - \mathbf p_j) + \frac1{\rho_0}\sum_j\lambda_j\nabla_{\mathbf p_i}W(\mathbf p_i - \mathbf p_j)
@@ -179,7 +179,7 @@ $$
 W'(\mathbf x) = \frac{\mathbf x}{\Vert\mathbf x\Vert}{W^{\text{poly6}}}'(r)
 $$
 
-and so the difference between $\nabla_{\mathbf p_i}W(\mathbf p_i - \mathbf p_j)$ and $\nabla_{\mathbf p_i}W(\mathbf p_j - \mathbf p_i)$ is a multiplication by $-1$. Why do we switch the order back to $\mathbf p_i - \mathbf p_j$? Note that the $-1$ really matters to the derivative for making a particle and its neighbours opposites. Switching from viewing $\mathbf p_i$ as a neighbour in $\nabla_{\mathbf p_i}C_j$ to viewing it as _the_ particle to update means multiplying by $-1$. Another way to look at it, 
+And so the difference between $\nabla_{\mathbf p_i}W(\mathbf p_i - \mathbf p_j)$ and $\nabla_{\mathbf p_i}W(\mathbf p_j - \mathbf p_i)$ is a multiplication by $-1$. Why do we switch the order back to $\mathbf p_i - \mathbf p_j$? Note that the $-1$ really matters to the derivative for making a particle and its neighbours opposites. Switching from viewing $\mathbf p_i$ as a neighbour in $\nabla_{\mathbf p_i}C_j$ to viewing it as _the_ particle to update means multiplying by $-1$. Another way to look at it,
 
 $$
 \frac\partial{\partial \mathbf b}\Vert\mathbf a - \mathbf b\Vert = -\frac{\mathbf a - \mathbf b}{\Vert\mathbf a - \mathbf b\Vert} = \frac{\mathbf b - \mathbf a}{\Vert\mathbf a - \mathbf b\Vert}
@@ -199,6 +199,8 @@ Following are the smaller details and extra considerations found in the paper.
 
 ## Explaining (2)
 
+The partial derivative of $C_i$ with respect to $\mathbf p_k$. There are two cases on if $\mathbf p_k$ is _the_ particle $\mathbf p_i$, or one of its neighbours; $\mathbf p_j$. If it's one of the neighbours then all other terms of the summation are constants which we ignore, and also you can clearly see from the chain rule that $\nabla_{\mathbf p_i}W = -\nabla_{\mathbf p_j}W$ which is presumably why we see the minus sign below (although it doesn't make much sense; that's already included in the $\nabla_{\mathbf p_j}W$! Perhaps it was meant to both be partial derivatives with respect to $\mathbf p_i$ of the kernel function, rather than the $\mathbf p_k$ we see here).
+
 $$
 \begin{align}
 \nabla_{\mathbf p_k}C_i = \frac{1}{\rho_0} \begin{cases}
@@ -207,6 +209,8 @@ $$
 \end{cases}
 \end{align} \tag 2
 $$
+
+## Explaining (4)
 
 \[TBC\]
 
