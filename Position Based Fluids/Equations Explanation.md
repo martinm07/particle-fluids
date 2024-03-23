@@ -54,7 +54,9 @@ $$
 ## Explaining (1), (3) and (5)
 
 $C_i$ is the constraint on the $i$th particle in the simulation. The goal first and foremost in creating a fluid is making it _incompressible_. The density of e.g. water doesn't change (if you were to try "stretch" it it would split into 2 or more blobs, if you tried to "squish" it it would escape however it can, be it leaking through small holes or using the force you're applying to break through walls. Water only actually compresses under really high loads which we're not interested in simulating here). Thus, this is what the constraint (1) enforces; that the particle should remain at the rest density $\rho_0$ (the constraint is satisfied when it $= 0$). The density at the particle's position is estimated by seeing how close the neighbouring particles are, which is we do by summing over the kernel function $W$ being applied to $\mathbf p_i - \mathbf p_j$, where $\mathbf p_j$ is the $j$th neighbouring particle to $\mathbf p_i$. All $W$ take the distance between $\mathbf p_i$ and $\mathbf p_j$— $r = \left\Vert\mathbf p_i - \mathbf p_j\right\Vert$ and apply something like a Gaussian distribution, simply saying that closer particles means more density. We could choose anything for this and the choice affects the behaviour of the fluid. "Poly6" will be the star of the show here; $W^\text{poly6} = \frac{315}{64\pi h^9}\left(h^2 - r^2\right)^3$ for being fast to compute and well-behaving.
+
 ![Graph of poly6, looking quite like the Gaussian distribution](img/poly6.png)
+
 Anyways, the goal is to find a $\Delta \mathbf p$ such that
 
 $$
@@ -107,9 +109,11 @@ $$
 And that makes a lot of sense if you think about what we did; get the tangent line (plane) at a point on the function and solve for when _that_ $= 0$ instead.
 
 ![Newton's method in the 2D case](img/tangent-line.png)
+
 However, look at what happens when you step this up a dimension:
 
 ![Newton's method in the 3D case](img/tangent-plane.png)
+
 There in an entire _line_ of points which solves the tangent plane, and it's ambiguous which specific point we should choose. $-\frac{C(\mathbf p)}{\nabla C^T}$ doesn't make much sense as a thing to exist, and we can't divide by a vector like this. It's more clear when you un-vectorize it (like I showed for $L_f(x, y)$ above) that there's 2 (or more) unknowns, 1 equation.
 Rather, what the paper does next is say that $\Delta \mathbf p$ will lie on some point of the line spanned by the vector $\nabla C(\mathbf p)$, the direction of steepest ascent/descent for our point:
 
@@ -136,7 +140,9 @@ $$
 $$
 
 , which might surprise you. A summation through $k$ is a summation through all particles $\mathbf p_j$ neighbouring $\mathbf p_i$, with the inclusion of $\mathbf p_i$ itself. And so, what the denominator implies is that $\nabla C$, the gradient of $C$, is a vector of dimensionality $n$, containing the partial derivatives $\nabla_{\mathbf p_k} C_i$. But notice that $\nabla_{\mathbf p_k} C_i$ is itself a (3D or 2D, depending on what we choose) vector! The squares of these vectors is taken to be dot products with themselves, expressed as $\vert\dots\vert^2$, making for constants that play nice with defining $\lambda_i$. This does make some basic level of sense; the constraint $C_i$ is a function of $\mathbf p_i$ _and_ its neighbours (altogether referred to as $\mathbf p_1, \dots, \mathbf p_n$), so this is what the gradient is. However, we could have just as easily said that the constraint is only a function of $\mathbf p_i$, and treat all the neighbouring particles' positions as constants. With how we did do things, we must imagine $\Delta \mathbf p$ as taking a step in some very high-dimensional parameter space, adjusting both the particle's position _and the positions of its neighbours_ the smallest possible amount that satisfies the constraint (approximately, we're working with linear approximations). Before continuing with that though, I want to recognize that we just engaged in some black magic; $\nabla C$ is a vector of vectors. To justify this, note that we could've flattened $\nabla C$ to have dimensionality $3n$ or $2n$ and actually, because we were just taking dot products, nothing changes; it's still the same sum of squared terms. Really, this is what we should've made explicit from the start (e.g. saying $C_i(\mathbf p_1^{(x)}, \mathbf p_1^{(y)}, \dots, \mathbf p_n^{(x)}, \mathbf p_n^{(y)})$ in Equation (1), and so on), and only later make this "factorization." Now, we will continue our interpretation of $\Delta \mathbf p$.
+
 ![lambda affecting magnitudes of all gradient vectors](img/lambda-i.png)
+
 $\lambda$ Is a constant specifically tailored for $\nabla C(\mathbf p)$, to adjust the particle and all neighbouring particles in order to satisfy the constraint. So, when we use it in Equation (5) like this;
 
 $$
@@ -156,6 +162,7 @@ $$
 $$
 
 ![example gradient vectors of neighbours' neighbours for their updates](img/neighbour-gradients.png)
+
 This follows from $\Delta \mathbf p \approx \nabla C(\mathbf p)\lambda$, only using the partial derivative with respect to $\mathbf p_i$ (this time as a neighbour to $\mathbf p_j$). Applying a summation of all $\mathbf p_j$ we get
 
 $$
