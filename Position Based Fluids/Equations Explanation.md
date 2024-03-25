@@ -212,6 +212,16 @@ $$
 
 ## Explaining (4)
 
+
+
+\[TBC\]
+
+## Explaining (6) and (7)
+
+\[TBC\]
+
+## Explaining (8)
+
 \[TBC\]
 
 ## Appendices

@@ -54,6 +54,7 @@ const gpuComputeConstructerIsVarying = (
 interface GPUComputeOptions {
   format?: THREE.PixelFormat;
   type?: THREE.TextureDataType;
+  debugOutput?: (data: number[][]) => void;
 }
 
 export class GPUCompute {
@@ -71,6 +72,7 @@ export class GPUCompute {
   renderer: THREE.WebGLRenderer;
   format: THREE.PixelFormat = THREE.RGBAFormat;
   type: THREE.TextureDataType = THREE.UnsignedByteType;
+  debugOutput?: (data: number[][]) => void;
 
   constructor(
     numComputes: number | [width: number, height: number],
@@ -79,6 +81,7 @@ export class GPUCompute {
     inputs: Array<GPUComputeConstructTexture | GPUComputeConstructVarying>,
     options?: GPUComputeOptions
   ) {
+    this.debugOutput = options?.debugOutput;
     if (typeof numComputes === "number") {
       this.length = numComputes;
       [this.sizeX, this.sizeY] = getSizeXY(numComputes);
@@ -384,6 +387,8 @@ export class GPUCompute {
       this.renderer.copyFramebufferToTexture(vector, texture);
     }
 
+    if (this.debugOutput) this.debugOutput(this.readData());
+
     this.renderer.xr.enabled = currentXrEnabled;
     this.renderer.shadowMap.autoUpdate = currentShadowAutoUpdate;
     this.renderer.outputColorSpace = currentOutputColorSpace;
@@ -410,6 +415,45 @@ export class GPUCompute {
   updateUniform(name: string, value: any) {
     this.mesh.material.uniforms[name] ??= { value };
     this.mesh.material.uniforms[name].value = value;
+  }
+
+  static THREETypeToArray(type: THREE.TextureDataType) {
+    if (type === THREE.UnsignedByteType) return Uint8Array;
+    else if (type === THREE.ByteType) return Int8Array;
+    else if (type === THREE.ShortType) return Int16Array;
+    else if (type === THREE.UnsignedShortType) return Uint16Array;
+    else if (type === THREE.IntType) return Int32Array;
+    else if (type === THREE.UnsignedIntType) return Uint32Array;
+    else throw new Error(`Unsupported type. Given: ${type}`);
+  }
+
+  // prettier-ignore
+  static THREEFormatToNum(format: THREE.PixelFormat) {
+    if ([THREE.AlphaFormat, THREE.RedFormat, THREE.RedIntegerFormat].some(f => f === format)) return 1;
+    else if ([THREE.RGFormat, THREE.RGIntegerFormat].some(f => f === format)) return 2;
+    else if ([THREE.RGBAFormat, THREE.RGBAIntegerFormat].some(f => f === format)) return 4;
+    else throw new Error(`Unsupported format. Given: ${format}`);
+  }
+
+  readData() {
+    const arrConstructor = GPUCompute.THREETypeToArray(this.type);
+    const pixelSize = GPUCompute.THREEFormatToNum(this.format);
+
+    const pixelBuffer = new arrConstructor(this.sizeX * this.sizeY * pixelSize);
+    this.renderer.readRenderTargetPixels(
+      this.renderTarget,
+      0,
+      0,
+      this.sizeX,
+      this.sizeY,
+      pixelBuffer
+    );
+    return Array.from(Array(this.sizeX * this.sizeY), (_, i) => {
+      return Array.from(
+        Array(pixelSize),
+        (_, j) => pixelBuffer[i * pixelSize + j]
+      );
+    });
   }
 }
 const passThruVertexShader = `

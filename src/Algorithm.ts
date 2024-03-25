@@ -19,6 +19,7 @@ import {
   initTexture,
   texCoords,
   fTrianglesEqual,
+  isValid,
 } from "./helper";
 import {
   LineSegmentsReference,
@@ -61,7 +62,7 @@ export class SimParams {
     this.GRIDSIZE = params.GRIDSIZE ?? 1;
     this.BOUNDARY_MARGIN = params.BOUNDARY_MARGIN ?? 0.5;
     this.KERNEL_WIDTH = params.KERNEL_WIDTH ?? 1.32;
-    this.GRAVITY = params.GRAVITY ?? 125;
+    this.GRAVITY = params.GRAVITY ?? 200;
     this.REST_DENSITY = params.REST_DENSITY ?? 0.877;
     this.CONSTRAINT_RELAXATION = params.CONSTRAINT_RELAXATION ?? 3.2;
     this.ARTIFICIAL_PRESSURE_SCALE = params.ARTIFICIAL_PRESSURE_SCALE ?? 0.1;
@@ -195,6 +196,14 @@ export class Algorithm {
     });
     this.sdf.returnSDF(this.boundsSegments, this.boundsNormals);
 
+    const NaNCheck = (msg: string, in_: number[][]) => {
+      const floats = in_.map((b) => bytesToFloat(new Uint8Array(b)));
+      if (floats.some((val) => !isValid(val))) {
+        console.log(in_);
+        throw new Error(msg);
+      }
+    };
+
     this.gpuComputes[1] = new GPUCompute(
       this.P * 2,
       computeShader1Code,
@@ -205,6 +214,9 @@ export class Algorithm {
         { name: "velocitiesTexture" },
         { name: "GPUC1_Mask", texture: initMask(this.P, 2) },
       ]
+      // {
+      //   debugOutput: NaNCheck.bind(null, "1"),
+      // }
     );
 
     // x/y components combined, and for every p_ij there's a redundant p_ji, thus `... / 2 / 2`, or `... / 4`
@@ -220,6 +232,9 @@ export class Algorithm {
         { name: "pj_xReference", itemSize: 2, updates: true },
         { name: "pj_yReference", itemSize: 2, updates: true },
       ]
+      // {
+      //   debugOutput: NaNCheck.bind(null, "3"),
+      // }
     );
     this.gpuComputes[3].updateUniform("h", this.params.KERNEL_WIDTH);
     this.gpuComputes[3].updateUniform("NUL", NUL);
@@ -237,6 +252,9 @@ export class Algorithm {
         { name: "numExtras", itemSize: 1, updates: true },
         { name: "pRefN" },
       ]
+      // {
+      //   debugOutput: NaNCheck.bind(null, "4"),
+      // }
     );
     this.gpuComputes[4].updateUniform("NUL", NUL);
     this.gpuComputes[4].updateUniform("h", this.params.KERNEL_WIDTH);
@@ -275,6 +293,9 @@ export class Algorithm {
         { name: "X" },
         { name: "SDF" },
       ]
+      // {
+      //   debugOutput: NaNCheck.bind(null, "5"),
+      // }
     );
     this.gpuComputes[5].updateUniform("NUL", NUL);
     this.gpuComputes[5].updateUniform(
@@ -299,6 +320,9 @@ export class Algorithm {
         { name: "pRefN_Length", itemSize: 1, updates: true },
         { name: "pRefPN" },
       ]
+      // {
+      //   debugOutput: NaNCheck.bind(null, "6"),
+      // }
     );
     this.gpuComputes[6].updateUniform("h", this.params.KERNEL_WIDTH);
     this.gpuComputes[6].updateUniform(
@@ -316,6 +340,9 @@ export class Algorithm {
       assignPositionsCode,
       this.renderer,
       [{ name: "xStarAndVelocity" }]
+      // {
+      //   debugOutput: NaNCheck.bind(null, "7"),
+      // }
     );
 
     // Provide some constant uniforms for all shaders
@@ -555,6 +582,7 @@ export class Algorithm {
         (_, i) => i + accumIndex / 2
       );
 
+      // Because we filter out neighbours with an index smaller than i, we need them back
       let extraIDs: number[] = Array(this.allNeighbours.length); // indices for xStar
       let extraNeighbours: number[] = Array(this.allNeighbours.length); // indices for GPUC3
       for (let i_ = 0; i_ < this.allNeighbours.length; i_++) {
@@ -600,6 +628,22 @@ export class Algorithm {
       accumIndex += this.allNeighbours[i].length * 2;
       accumIndexFull += nRefFull.length;
     }
+
+    // const C4Data = [
+    //   this.C4_pRefN_startIndex,
+    //   this.C4_pRefN_Length,
+    //   this.C4_numExtras,
+    //   this.pRefNData,
+    // ];
+    // for (const [i, data] of C4Data.entries()) {
+    //   if (data.some((val) => !isValid(val))) {
+    //     console.log(C4Data);
+    //     throw new Error(`${i}`);
+    //   } else {
+    //     console.log("Nothing bad here!");
+    //   }
+    // }
+
     // Copy the varying values into each part of the mask
     // GPUC3
     for (let k = 1; k < 3; k++) {

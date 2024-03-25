@@ -536,3 +536,7 @@ export function visualiseBounds(
     }
   };
 }
+
+export function isValid(n?: number) {
+  return n !== undefined && n !== null && isFinite(n) && !isNaN(n);
+}

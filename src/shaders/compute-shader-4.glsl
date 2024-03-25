@@ -46,10 +46,14 @@ vec2 getCoord(float index, vec2 res) {
 }
 
 void main() {
+    // const float pos_infinity = uintBitsToFloat(0x7F800000);
+    // const float neg_infinity = uintBitsToFloat(0xFF800000);
+
     vec2 uv = gl_FragCoord.xy / resolution.xy;
     float mask = texture2D(GPUC4_Mask, uv).x * 255.0;
 
     if (mask == 1.0) {
+        isnan(pRefN_startIndex);
         // λᵢ
         float C_i = 0.0;
         float sum_dCi2 = 0.0;
@@ -90,12 +94,14 @@ void main() {
         gl_FragColor = interpretFloat(lambda);
     // ∑ⱼ(sCorr∇W(pᵢ - pⱼ))
     } else if (mask == 2.0) {
+        // isnan(pRefN_startIndex);
         float APqW = (315.0 / (64.0 * PI * pow(h, 9.0))) * pow(pow(h, 2.0) - pow(APdeltaQ, 2.0), 3.0);
         float s_corr = 0.0;
         for (float j = 0.0; j < pRefN_Length; j++) {
             vec2 refCoord = getCoord(pRefN_startIndex + j, nRefRes);
             vec2 coord = texture2D(pRefN, refCoord).xy;
             float W_ij = interpretBytesVector(texture2D(GPUC3_Out, coord).xyzw);
+            // if (isnan(W_ij) || isinf(W_ij)) W_ij = 10.0;
 
             vec2 indexCoord = coord * c3Resolution - 0.5;
             float index = indexCoord.x + indexCoord.y * c3Resolution.x;
@@ -105,8 +111,14 @@ void main() {
                 dWi_x *= -1.0;
             }
 
+            // if (isnan(dWi_x) || isinf(dWi_x)) dWi_x = 1.0;
             s_corr += -1.0 * APk * pow(W_ij / APqW, APn) * dWi_x;
         }
+        // s_corr += 10.0;
+        // for (int i = 0; i < 5; i++) {
+        //     s_corr -= float(i);
+        // }
+        // if (isnan(s_corr) || isinf(s_corr)) s_corr = 0.0;
         gl_FragColor = interpretFloat(s_corr);
     } else if (mask == 3.0) {
         float APqW = (315.0 / (64.0 * PI * pow(h, 9.0))) * pow(pow(h, 2.0) - pow(APdeltaQ, 2.0), 3.0);
@@ -115,6 +127,7 @@ void main() {
             vec2 refCoord = getCoord(pRefN_startIndex + j, nRefRes);
             vec2 coord = texture2D(pRefN, refCoord).xy;
             float W_ij = interpretBytesVector(texture2D(GPUC3_Out, coord).xyzw);
+            // if (isnan(W_ij) || isinf(W_ij)) W_ij = 10.0;
 
             vec2 indexCoord = coord * c3Resolution - 0.5;
             float index = indexCoord.x + indexCoord.y * c3Resolution.x;
@@ -124,8 +137,12 @@ void main() {
                 dWi_y *= -1.0;
             }
 
+            // if (isnan(dWi_y) || isinf(dWi_y)) dWi_y = 1.0;
             s_corr += -1.0 * APk * pow(W_ij / APqW, APn) * dWi_y;
         }
+        // if (isnan(s_corr)) s_corr = 1. / 0.;
+        // isnan(pRefN_startIndex);
+        // s_corr = 1. / 0.;
         gl_FragColor = interpretFloat(s_corr);
     }
 }
